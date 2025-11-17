@@ -15,8 +15,10 @@
 package integration
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -117,6 +119,16 @@ func (h *TestHarness) DeleteInterface(name string) {
 // StartDaemon starts the Jack daemon
 // The daemon runs in the same namespace as the test, so it can see all created interfaces
 func (h *TestHarness) StartDaemon(ctx context.Context) error {
+	return h.startDaemonInternal(ctx, nil)
+}
+
+// StartDaemonWithOutput starts the Jack daemon and captures log output to the provided writer
+func (h *TestHarness) StartDaemonWithOutput(ctx context.Context, logWriter *bytes.Buffer) error {
+	return h.startDaemonInternal(ctx, logWriter)
+}
+
+// startDaemonInternal is the internal implementation of daemon startup
+func (h *TestHarness) startDaemonInternal(ctx context.Context, logWriter *bytes.Buffer) error {
 	// Create empty interfaces.json to prevent auto-detection (only if it doesn't exist)
 	// Tests will use "set" command to configure interfaces explicitly
 	// Preserve existing interfaces.json if it exists (for persistence tests)
@@ -126,6 +138,16 @@ func (h *TestHarness) StartDaemon(ctx context.Context) error {
 		if err := os.WriteFile(interfacesPath, []byte(emptyInterfaces), 0644); err != nil {
 			return fmt.Errorf("failed to create empty interfaces config: %w", err)
 		}
+	}
+
+	// Redirect log output if requested
+	if logWriter != nil {
+		log.SetOutput(logWriter)
+		// Restore default log output when context is done
+		go func() {
+			<-ctx.Done()
+			log.SetOutput(os.Stderr)
+		}()
 	}
 
 	// Create daemon server
@@ -164,6 +186,16 @@ func (h *TestHarness) StartDaemon(ctx context.Context) error {
 		h.t.Logf("Daemon started successfully")
 		return nil
 	}
+}
+
+// WriteConfig writes a configuration file to the test config directory
+func (h *TestHarness) WriteConfig(filename string, content []byte) error {
+	configPath := filepath.Join(h.configDir, filename)
+	if err := os.WriteFile(configPath, content, 0644); err != nil {
+		return fmt.Errorf("failed to write config file %s: %w", filename, err)
+	}
+	h.t.Logf("Wrote config file: %s", filename)
+	return nil
 }
 
 // WaitForDaemon waits for daemon to be ready to accept connections

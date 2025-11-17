@@ -18,8 +18,16 @@ type PluginState struct {
 	Enabled bool   `json:"enabled"` // Whether the plugin is enabled
 }
 
+// ObserverConfig represents configuration for the network observer
+type ObserverConfig struct {
+	Enabled             bool `json:"enabled"`               // Enable observer
+	AutoReconcile       bool `json:"auto_reconcile"`        // Automatically fix drift
+	ReconcileIntervalMS int  `json:"reconcile_interval_ms"` // Minimum time between reconciliations (default: 60000ms = 1 minute)
+}
+
 // JackConfig represents the main Jack configuration (/etc/jack/jack.json)
 type JackConfig struct {
-	Plugins map[string]PluginState `json:"plugins"` // Map of plugin name to state
-	Version string                 `json:"version"`
+	Plugins  map[string]PluginState `json:"plugins"`  // Map of plugin name to state
+	Observer *ObserverConfig        `json:"observer"` // Observer configuration (optional)
+	Version  string                 `json:"version"`
 }

@@ -78,6 +78,10 @@ func (s *State) LoadCommittedRoutes(config *types.RoutesConfig) {
 	s.LoadCommitted("routes", config)
 }
 
+func (s *State) LoadCommittedJackConfig(config *types.JackConfig) {
+	s.LoadCommitted("jack", config)
+}
+
 // GetCurrent returns the current effective config (pending if exists, otherwise committed)
 func (s *State) GetCurrent(configType string) (interface{}, error) {
 	s.mu.RLock()
@@ -112,6 +116,17 @@ func (s *State) GetCurrentRoutes() *types.RoutesConfig {
 		return nil
 	}
 	if typed, ok := config.(*types.RoutesConfig); ok {
+		return typed
+	}
+	return nil
+}
+
+func (s *State) GetCurrentJackConfig() *types.JackConfig {
+	config, _ := s.GetCurrent("jack") //nolint:errcheck // Intentionally return nil on error
+	if config == nil {
+		return nil
+	}
+	if typed, ok := config.(*types.JackConfig); ok {
 		return typed
 	}
 	return nil

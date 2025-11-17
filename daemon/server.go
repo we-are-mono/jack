@@ -39,11 +39,12 @@ func GetSocketPath() string {
 type handlerFunc func(Request) Response
 
 type Server struct {
-	state    *State
-	listener net.Listener
-	done     chan struct{}
-	handlers map[string]handlerFunc
-	registry *PluginRegistry
+	state           *State
+	listener        net.Listener
+	done            chan struct{}
+	handlers        map[string]handlerFunc
+	registry        *PluginRegistry
+	networkObserver *NetworkObserver
 }
 
 func NewServer() (*Server, error) {
@@ -130,6 +131,9 @@ func (s *Server) loadPlugins() error {
 		log.Printf("[WARN] Failed to save updated plugin versions: %v", err)
 	}
 
+	// Store jack config in state for access by observer
+	s.state.LoadCommittedJackConfig(jackConfig)
+
 	log.Printf("[REGISTRY] Loaded plugins: %v", s.registry.List())
 	return nil
 }
@@ -141,6 +145,14 @@ func (s *Server) Start(applyOnStartup bool) error {
 	if err := s.loadPlugins(); err != nil {
 		log.Printf("[WARN] Failed to load plugins: %v", err)
 	}
+
+	// Start network observer to detect external configuration changes
+	s.networkObserver = NewNetworkObserver(s)
+	go func() {
+		if err := s.networkObserver.Run(s.done); err != nil {
+			log.Printf("[ERROR] Network observer failed: %v", err)
+		}
+	}()
 
 	// Load snapshots from disk
 	if err := s.state.LoadSnapshotsFromDisk(); err != nil {
@@ -207,6 +219,11 @@ func (s *Server) Start(applyOnStartup bool) error {
 
 	// Apply config on startup if requested
 	if applyOnStartup {
+		// Mark that Jack is making changes
+		if s.networkObserver != nil {
+			s.networkObserver.MarkChange()
+		}
+
 		log.Println("Applying configuration on startup...")
 
 		// Apply interfaces first
@@ -532,6 +549,11 @@ func (s *Server) handleApply() Response {
 
 // executeApplyWithRollback performs the actual apply operations with automatic rollback on failure.
 func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error {
+	// Mark that Jack is making changes to prevent observer from treating them as external
+	if s.networkObserver != nil {
+		s.networkObserver.MarkChange()
+	}
+
 	// Track what we've applied for granular rollback
 	appliedSteps := []string{}
 
