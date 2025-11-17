@@ -1,0 +1,31 @@
+{
+  "version": "1",
+  "interfaces": {
+    "wg0": {
+      "type": "wireguard",
+      "enabled": true,
+      "device_name": "wg0",
+      "private_key": "YOUR_PRIVATE_KEY_HERE",
+      "listen_port": 51820,
+      "address": "10.8.0.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1420,
+      "firewall_zone": "vpn",
+      "peers": [
+        {
+          "public_key": "CLIENT1_PUBLIC_KEY_HERE",
+          "allowed_ips": ["10.8.0.2/32"],
+          "persistent_keepalive": 25,
+          "comment": "Laptop"
+        },
+        {
+          "public_key": "CLIENT2_PUBLIC_KEY_HERE",
+          "allowed_ips": ["10.8.0.3/32"],
+          "persistent_keepalive": 25,
+          "comment": "Phone"
+        }
+      ],
+      "comment": "WireGuard VPN server for road warrior clients"
+    }
+  }
+}

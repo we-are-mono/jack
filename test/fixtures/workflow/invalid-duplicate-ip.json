@@ -1,0 +1,22 @@
+{
+  "interfaces": {
+    "eth0": {
+      "type": "physical",
+      "device": "eth0",
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.1.10",
+      "netmask": "255.255.255.0",
+      "mtu": 1500
+    },
+    "eth1": {
+      "type": "physical",
+      "device": "eth1",
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.1.10",
+      "netmask": "255.255.255.0",
+      "mtu": 1500
+    }
+  }
+}

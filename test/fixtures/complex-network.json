@@ -1,0 +1,47 @@
+{
+  "interfaces": {
+    "br-lan": {
+      "type": "bridge",
+      "device": "br-lan",
+      "bridge_ports": ["eth0", "eth1"],
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.1.1",
+      "netmask": "255.255.255.0"
+    },
+    "br-lan.100": {
+      "type": "vlan",
+      "device": "br-lan",
+      "device_name": "br-lan.100",
+      "vlan_id": 100,
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.100.1",
+      "netmask": "255.255.255.0"
+    },
+    "eth2": {
+      "type": "physical",
+      "device": "eth2",
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "10.0.0.1",
+      "netmask": "255.255.255.0"
+    }
+  },
+  "routes": {
+    "default": {
+      "destination": "0.0.0.0/0",
+      "gateway": "192.168.1.254",
+      "interface": "br-lan",
+      "metric": 100,
+      "enabled": true
+    },
+    "guest-network": {
+      "destination": "192.168.200.0/24",
+      "gateway": "192.168.100.254",
+      "interface": "br-lan.100",
+      "metric": 200,
+      "enabled": true
+    }
+  }
+}

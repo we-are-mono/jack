@@ -1,0 +1,26 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    purge)
+        # Remove config files on purge
+        echo "Purging jack configuration files..."
+        rm -rf /etc/jack
+        rm -rf /var/lib/jack
+        rm -rf /run/jack
+        rm -rf /var/log/jack
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        # Don't remove configs on normal remove, only on purge
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

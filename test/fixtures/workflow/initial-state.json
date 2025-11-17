@@ -1,0 +1,21 @@
+{
+  "interfaces": {
+    "eth0": {
+      "type": "physical",
+      "device": "eth0",
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.1.10",
+      "netmask": "255.255.255.0",
+      "gateway": "192.168.1.1",
+      "mtu": 1500
+    }
+  },
+  "routes": [
+    {
+      "destination": "10.0.0.0/8",
+      "gateway": "192.168.1.1",
+      "metric": 100
+    }
+  ]
+}

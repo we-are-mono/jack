@@ -1,0 +1,17 @@
+{
+  "version": "1.0",
+  "plugins": {
+    "dnsmasq": {
+      "enabled": false,
+      "version": "1.0.0"
+    },
+    "monitoring": {
+      "enabled": false,
+      "version": "1.0.0"
+    },
+    "nftables": {
+      "enabled": false,
+      "version": "1.0.0"
+    }
+  }
+}

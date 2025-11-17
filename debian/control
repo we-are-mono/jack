@@ -1,0 +1,26 @@
+Source: jack
+Section: net
+Priority: optional
+Maintainer: Mono Team <team@mono.com>
+Build-Depends: debhelper (>= 10), golang-go (>= 1.24)
+Standards-Version: 4.5.0
+Homepage: https://github.com/we-are-mono/jack
+
+Package: jack
+Architecture: arm64
+Depends: ${shlibs:Depends}, ${misc:Depends}, systemd
+Recommends: dnsmasq (>= 2.80), nftables (>= 0.9), wireguard-tools
+Description: Network gateway management tool
+ Jack is a comprehensive network gateway management tool that provides
+ a unified interface for managing firewall, DHCP, DNS, VPN, and routing
+ configurations through a plugin-based architecture.
+ .
+ Features:
+  - Plugin-based architecture with core plugins (nftables, dnsmasq, wireguard, monitoring)
+  - Firewall management with nftables (zones, forwarding, NAT, port forwarding)
+  - DHCP and DNS server configuration via dnsmasq
+  - WireGuard VPN server and client support
+  - Static route management with metric-based priority
+  - Network interface configuration (bridges, VLANs)
+  - System monitoring and health checks
+  - Unix socket daemon with CLI interface

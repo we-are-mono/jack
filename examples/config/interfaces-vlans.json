@@ -1,0 +1,70 @@
+{
+  "version": "1",
+  "interfaces": {
+    "wan": {
+      "type": "physical",
+      "device_name": "fm1-mac9",
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "10.0.0.199",
+      "netmask": "255.255.255.0",
+      "gateway": "10.0.0.1",
+      "metric": 100,
+      "mtu": 1500,
+      "ipv6": {
+        "enabled": true,
+        "protocol": "dhcpv6"
+      },
+      "comment": "WAN port - static IP configuration"
+    },
+    "lan": {
+      "type": "bridge",
+      "device_name": "br-lan",
+      "bridge_ports": ["fm1-mac2", "fm1-mac5"],
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.1.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1500,
+      "bridge_stp": false,
+      "bridge_forward_delay": 2,
+      "comment": "Main LAN bridge (untagged)"
+    },
+    "guest": {
+      "type": "vlan",
+      "parent_device": "fm1-mac6",
+      "device_name": "fm1-mac6.10",
+      "vlan_id": 10,
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.10.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1500,
+      "comment": "Guest WiFi network - VLAN 10"
+    },
+    "iot": {
+      "type": "vlan",
+      "parent_device": "fm1-mac6",
+      "device_name": "fm1-mac6.20",
+      "vlan_id": 20,
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.20.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1500,
+      "comment": "IoT devices - VLAN 20"
+    },
+    "management": {
+      "type": "vlan",
+      "parent_device": "fm1-mac6",
+      "device_name": "fm1-mac6.99",
+      "vlan_id": 99,
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.99.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1500,
+      "comment": "Management VLAN - restricted access"
+    }
+  }
+}

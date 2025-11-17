@@ -1,0 +1,79 @@
+#!/usr/bin/make -f
+
+export DH_VERBOSE = 1
+export GOOS = linux
+export GOARCH = arm64
+export CGO_ENABLED = 0
+
+VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0")
+BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
+
+%:
+	dh $@
+
+override_dh_auto_build:
+	# Build jack main binary
+	go build \
+		-ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" \
+		-o jack \
+		.
+
+	# Build nftables plugin
+	cd plugins/core/nftables && \
+		go build \
+			-ldflags "-s -w" \
+			-o ../../../jack-plugin-nftables \
+			.
+
+	# Build dnsmasq plugin
+	cd plugins/core/dnsmasq && \
+		go build \
+			-ldflags "-s -w" \
+			-o ../../../jack-plugin-dnsmasq \
+			.
+
+	# Build wireguard plugin
+	cd plugins/core/wireguard && \
+		go build \
+			-ldflags "-s -w" \
+			-o ../../../jack-plugin-wireguard \
+			.
+
+	# Build monitoring plugin
+	cd plugins/core/monitoring && \
+		go build \
+			-ldflags "-s -w" \
+			-o ../../../jack-plugin-monitoring \
+			.
+
+override_dh_auto_install:
+	# Install main binary
+	install -D -m 0755 jack $(CURDIR)/debian/jack/usr/local/bin/jack
+
+	# Install plugins
+	install -D -m 0755 jack-plugin-nftables $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-nftables
+	install -D -m 0755 jack-plugin-dnsmasq $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-dnsmasq
+	install -D -m 0755 jack-plugin-wireguard $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-wireguard
+	install -D -m 0755 jack-plugin-monitoring $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-monitoring
+
+	# Install systemd service
+	install -D -m 0644 debian/jack.service $(CURDIR)/debian/jack/lib/systemd/system/jack.service
+
+	# Create config directory
+	install -d -m 0755 $(CURDIR)/debian/jack/etc/jack
+
+	# Install default config templates
+	install -D -m 0644 examples/jack.json $(CURDIR)/debian/jack/etc/jack/templates/jack.json
+	install -D -m 0644 config/defaults/firewall.json $(CURDIR)/debian/jack/etc/jack/templates/nftables.json
+	install -D -m 0644 config/defaults/dhcp.json $(CURDIR)/debian/jack/etc/jack/templates/dhcp.json
+	install -D -m 0644 config/defaults/dns.json $(CURDIR)/debian/jack/etc/jack/templates/dns.json
+	install -D -m 0644 config/defaults/routes.json $(CURDIR)/debian/jack/etc/jack/templates/routes.json
+	install -D -m 0644 config/defaults/vpn.json $(CURDIR)/debian/jack/etc/jack/templates/wireguard.json
+	install -D -m 0644 examples/config/interfaces.json $(CURDIR)/debian/jack/etc/jack/templates/interfaces.json
+
+override_dh_auto_clean:
+	rm -f jack jack-plugin-nftables jack-plugin-dnsmasq jack-plugin-wireguard jack-plugin-monitoring
+	dh_auto_clean
+
+override_dh_auto_test:
+	# Skip tests for now

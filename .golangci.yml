@@ -1,0 +1,50 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - unused        # Reports unused constants, variables, functions and types (replaces deadcode, varcheck, structcheck)
+    - staticcheck   # Advanced static analysis
+    - gosec        # Security issues
+    - errcheck     # Unchecked errors
+    - ineffassign  # Ineffectual assignments
+    - govet        # Reports suspicious constructs
+    - gofmt        # Checks code formatting
+    - goimports    # Checks import formatting
+    - misspell     # Spelling mistakes
+    - unconvert    # Unnecessary type conversions
+    - unparam      # Unused function parameters
+
+linters-settings:
+  errcheck:
+    check-blank: true
+    check-type-assertions: true
+
+  govet:
+    enable-all: true
+
+  staticcheck:
+    checks: ["all"]
+
+  unused:
+    # Be more aggressive about finding unused code
+    field-writes-are-uses: false
+    # Note: exported-is-used defaults to true to avoid false positives
+    # Set to false only if you want to detect unused exported code
+    # (may flag intentional public APIs)
+
+  unparam:
+    # Check for unused function parameters
+    check-exported: false  # Don't check exported functions (public API)
+
+  ineffassign:
+    # Detect ineffectual assignments
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests
+    - path: _test\.go
+      linters:
+        - errcheck
+        - gosec

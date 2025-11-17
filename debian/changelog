@@ -1,0 +1,17 @@
+jack (0.1.0) unstable; urgency=medium
+
+  * Initial release
+  * Plugin-based architecture with hashicorp go-plugin
+  * Core plugins: nftables, dnsmasq, wireguard, monitoring
+  * Multi-capability plugin support
+  * Firewall management with zones, NAT, and port forwarding
+  * DHCP and DNS server configuration
+  * WireGuard VPN server and client support
+  * Static route management with metric-based priority
+  * Network interface configuration (bridges, VLANs)
+  * System monitoring and health checks
+  * Plugin management CLI
+  * Unix socket daemon with CLI interface
+  * Configuration templates in /etc/jack/templates/
+
+ -- Mono Team <team@mono.si>  Wed, 12 Nov 2025 00:00:00 +0000

@@ -1,0 +1,38 @@
+{
+  "version": "1",
+  "server": {
+    "enabled": true,
+    "port": 53,
+    "domain": "home.local",
+    "cache_size": 1000,
+    "upstreams": [
+      "1.1.1.1",
+      "1.0.0.1"
+    ],
+    "comment": "DNS-only server (no DHCP)"
+  },
+  "records": {
+    "a_records": [
+      {
+        "name": "gateway",
+        "ip": "192.168.1.1"
+      },
+      {
+        "name": "router",
+        "ip": "192.168.1.1"
+      }
+    ],
+    "cname_records": [
+      {
+        "name": "www",
+        "target": "gateway"
+      }
+    ],
+    "txt_records": [
+      {
+        "name": "_acme-challenge",
+        "text": "example-txt-record"
+      }
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "version": "1",
+  "dnsmasq": {
+    "enabled": false,
+    "port": 53,
+    "domain": "lan",
+    "servers": ["1.1.1.1", "8.8.8.8"]
+  },
+  "dhcp_pools": {},
+  "static_leases": [],
+  "dns_records": {
+    "a_records": [],
+    "cname_records": [],
+    "mx_records": [],
+    "srv_records": []
+  }
+}

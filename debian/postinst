@@ -1,0 +1,56 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    configure)
+        # Create state directory
+        mkdir -p /var/lib/jack
+        chmod 755 /var/lib/jack
+
+        # Create runtime directory
+        mkdir -p /run/jack
+        chmod 755 /run/jack
+
+        # Create log directory
+        mkdir -p /var/log/jack
+        chmod 755 /var/log/jack
+
+        # Create config directory if it doesn't exist
+        mkdir -p /etc/jack
+        chmod 755 /etc/jack
+
+        # Fresh install or upgrade
+        if [ -z "$2" ]; then
+            echo "Jack has been installed successfully!"
+            echo ""
+            echo "Configuration templates are available in /etc/jack/templates/"
+            echo "Copy and customize them to /etc/jack/ as needed."
+            echo ""
+            echo "To start the daemon:"
+            echo "  sudo systemctl enable jack"
+            echo "  sudo systemctl start jack"
+        else
+            echo "Jack has been upgraded to version $2"
+            echo "Reloading systemd daemon..."
+            systemctl daemon-reload
+
+            # Restart service if it was running
+            if systemctl is-active --quiet jack; then
+                echo "Restarting jack service..."
+                systemctl restart jack
+            fi
+        fi
+        ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+        ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+#DEBHELPER#
+
+exit 0

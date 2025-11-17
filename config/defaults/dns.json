@@ -1,0 +1,18 @@
+{
+  "version": "1.0",
+  "server": {
+    "enabled": false,
+    "port": 53,
+    "domain": "home.local",
+    "cache_size": 1000,
+    "upstreams": [
+      "1.1.1.1",
+      "8.8.8.8"
+    ]
+  },
+  "records": {
+    "a_records": [],
+    "cname_records": [],
+    "txt_records": []
+  }
+}

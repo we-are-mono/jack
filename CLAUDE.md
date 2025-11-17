@@ -1,0 +1,773 @@
+# Claude Development Guide for Jack
+
+## Project Overview
+
+Jack is a modern, transactional network configuration daemon for Linux systems. It provides a clean abstraction layer over Linux networking, firewalls, and services, making it easy to configure routers, gateways, and network appliances.
+
+### Key Features
+- **Transactional Configuration**: Stage changes, review them, then commit atomically
+- **Plugin-Based Architecture**: All services implemented as RPC-based plugins (nftables, dnsmasq, wireguard, monitoring)
+- **Firewall Management**: Zone-based firewall with NAT and port forwarding
+- **DHCP/DNS Server**: Built-in services via dnsmasq plugin
+- **VPN Support**: WireGuard client and server configurations
+- **System Monitoring**: Real-time status of daemon, interfaces, and services
+- **Unix Socket API**: Integration with web UIs or automation tools
+
+### Architecture Components
+1. **Jack Daemon** - Background service managing system state and plugins
+2. **Jack CLI** - Command-line interface for configuration
+3. **Plugins** - RPC-based providers (nftables, dnsmasq, wireguard, monitoring)
+
+```
+┌─────────────┐
+│  Jack CLI   │
+└──────┬──────┘
+       │ Unix Socket (/var/run/jack.sock)
+┌──────▼──────┐
+│ Jack Daemon │
+└──────┬──────┘
+       │ RPC (stdin/stdout)
+   ┌───┴────┬─────────┬──────────┐
+   ▼        ▼         ▼          ▼
+Network  Firewall   DHCP       VPN
+ (ip)   (nftables) (dnsmasq) (wireguard)
+```
+
+### Use Cases
+- Home routers and network gateways
+- Lab environments requiring frequent reconfiguration
+- Backend for web UIs (like Netrunner)
+- Automation via Ansible, Terraform, or custom tools
+
+**Target Deployment**: Debian-based systems (arm64 architecture)
+
+## Plugin Architecture
+
+**CRITICAL**: All functionality outside of core routing and interface management MUST be implemented as plugins. The daemon should remain lean and focused on:
+- Network interface configuration (bridges, VLANs, physical interfaces)
+- Static route management
+- Plugin lifecycle management
+- Configuration loading
+
+### How Plugins Work
+
+Plugins use **HashiCorp go-plugin with RPC communication**:
+
+1. **Plugin Discovery**: Daemon scans `/usr/lib/jack/plugins/` for executables matching `jack-plugin-*`
+2. **RPC Protocol**: Each plugin runs as a separate process and communicates with the daemon via RPC over stdin/stdout
+3. **Namespace Registration**: Plugins register capabilities (e.g., "firewall", "dhcp", "vpn") with version info
+4. **Configuration**: Plugins receive JSON configuration from `/etc/jack/<namespace>.json`
+5. **Lifecycle**: Daemon manages plugin start/stop/reload via RPC calls
+
+### Core Plugins
+
+- **nftables** (`plugins/core/nftables/`) - Firewall management with zones, NAT, port forwarding
+- **dnsmasq** (`plugins/core/dnsmasq/`) - DHCP and DNS server configuration
+- **wireguard** (`plugins/core/wireguard/`) - VPN tunnel management (client and server)
+- **monitoring** (`plugins/core/monitoring/`) - System health checks and metrics
+
+### Plugin Implementation Pattern
+
+Each plugin must:
+1. Implement the generic plugin adapter interface
+2. Provide `ApplyConfig`, `Validate`, `Flush`, `Enable`, `Disable`, `Status` methods
+3. Use the `jplugin.ServePlugin()` helper to expose RPC interface
+4. Handle configuration in a `types.go` file with JSON struct tags
+5. Implement actual functionality in separate files (e.g., `nftables.go`, `wireguard.go`)
+
+Example structure:
+```
+plugins/core/example/
+├── main.go          # Plugin entry point with RPC setup
+├── adapter.go       # Implements generic plugin adapter
+├── types.go         # Configuration structs
+└── example.go       # Core functionality
+```
+
+**When adding new functionality, create a new plugin instead of modifying the daemon core.**
+
+## Plugin Internals
+
+### Plugin Lifecycle
+
+Plugins go through the following lifecycle managed by the daemon:
+
+1. **Discovery** - Daemon scans `/usr/lib/jack/plugins/` for binaries matching `jack-plugin-*`
+2. **Loading** - Daemon spawns plugin process and establishes RPC connection via stdin/stdout
+3. **Metadata Query** - Daemon calls `Metadata()` to get plugin namespace, version, description, and default config
+4. **Registration** - Plugin registered in daemon's plugin registry by namespace
+5. **Configuration** - Daemon loads config from `/etc/jack/<plugin-name>.json` or uses plugin's default config
+6. **Activation** - Daemon calls `ApplyConfig()` to activate the plugin with its configuration
+7. **Running** - Plugin remains active, responding to RPC calls (Status, Validate, Flush)
+8. **Shutdown** - Daemon calls `Flush()` then `Close()` to gracefully terminate plugin
+
+### Configuration Loading
+
+The daemon loads plugin configurations in this priority order:
+
+1. **Configuration File** (`/etc/jack/<plugin-name>.json`)
+   - If the file exists, daemon loads and unmarshals it
+   - Passes the configuration to the plugin via `ApplyConfig(config)`
+
+2. **Default Configuration** (Plugin Metadata)
+   - If no config file exists, daemon checks plugin metadata for `DefaultConfig`
+   - If `DefaultConfig` is present, uses it instead of requiring a config file
+   - This allows plugins to work "out of the box" with sensible defaults
+
+3. **No Configuration**
+   - If neither file nor default config exists, plugin is skipped during apply operations
+   - Plugin can still be queried for status but won't perform any system changes
+
+**Example**: The monitoring plugin defines `DefaultConfig: {"enabled": true}` in its metadata. When enabled, it works immediately without requiring `/etc/jack/monitoring.json`.
+
+### Configuration Loading Points
+
+The daemon loads plugin configurations at three key points:
+
+1. **Daemon Startup** (`daemon/server.go:149-178`)
+   - Loads all enabled plugins from `jack.json`
+   - For each plugin, tries to load `<plugin-name>.json`
+   - Falls back to `DefaultConfig` if file doesn't exist
+   - Stores config in daemon state for later apply operations
+
+2. **Plugin Enable** (`daemon/server.go:813-833`)
+   - When user runs `jack plugin enable <name>`
+   - Immediately loads and applies config (file or default)
+   - Allows plugin to start working right away
+
+3. **Apply Configuration** (`daemon/server.go:497-509`)
+   - When user runs `jack apply`
+   - Applies all plugin configs to the system
+   - Uses config file if available, otherwise uses `DefaultConfig`
+
+### Plugin Metadata Structure
+
+Each plugin returns metadata via the `Metadata()` method:
+
+```go
+type PluginMetadata struct {
+    Namespace     string                 // Plugin namespace (e.g., "firewall", "vpn")
+    Version       string                 // Plugin version (e.g., "1.0.0")
+    Description   string                 // Human-readable description
+    ConfigPath    string                 // Expected config file path
+    DefaultConfig map[string]interface{} // Optional default configuration
+    Dependencies  []string               // Other plugins this depends on
+}
+```
+
+**DefaultConfig Example**:
+```go
+func (p *MonitoringAdapter) Metadata() plugins.PluginMetadata {
+    return plugins.PluginMetadata{
+        Namespace:   "monitoring",
+        Version:     "1.0.0",
+        Description: "System and network metrics collection",
+        ConfigPath:  "/etc/jack/monitoring.json",
+        DefaultConfig: map[string]interface{}{
+            "enabled": true,
+            "collection_interval": 5,
+        },
+    }
+}
+```
+
+### RPC Interface
+
+Plugins implement the following RPC methods (via `plugins/rpc.go`):
+
+- **`Metadata()`** - Returns plugin metadata (namespace, version, defaults)
+- **`ApplyConfig(configJSON []byte)`** - Apply configuration to the system
+- **`ValidateConfig(configJSON []byte)`** - Validate configuration without applying
+- **`Flush()`** - Remove all plugin-managed system state (cleanup)
+- **`Status()`** - Return current plugin status as JSON
+- **`Close()`** - Gracefully shut down plugin
+
+### Plugin State Management
+
+The daemon maintains plugin state in two places:
+
+1. **Registry** (`daemon/registry.go`)
+   - Maps namespace → plugin instance (RPC client)
+   - Maps plugin name → namespace (for config file lookups)
+   - Tracks which plugins are loaded and active
+
+2. **Configuration State** (`daemon/state.go`)
+   - Committed config (loaded from disk at startup)
+   - Staged config (pending changes not yet committed)
+   - Last applied config (for change detection)
+
+### Creating a New Plugin
+
+To create a new plugin:
+
+1. Create directory: `plugins/core/<name>/`
+2. Implement files:
+   - `main.go` - Entry point with `jplugin.ServePlugin()`
+   - `adapter.go` - Implements `PluginAdapter` interface with `Metadata()`, `ApplyConfig()`, etc.
+   - `types.go` - Configuration structs with JSON tags
+   - `<name>.go` - Core functionality implementation
+
+3. Register plugin metadata with optional `DefaultConfig`
+4. Build with correct architecture: `GOOS=linux GOARCH=arm64 go build -o jack-plugin-<name>`
+5. Deploy to `/usr/lib/jack/plugins/`
+6. Enable via `jack plugin enable <name>`
+
+### Plugin CLI Commands System
+
+Plugins can provide custom CLI commands that are automatically registered with the Jack CLI. This allows plugins to expose monitoring, diagnostics, or management functionality directly to users.
+
+#### Command Types
+
+**One-Off Commands** (default)
+- Execute once and return output
+- Example: `jack status`, `jack plugin info monitoring`
+- Standard request-response pattern
+
+**Continuous Commands** (metadata-driven)
+- Poll continuously with screen refresh
+- Used for live monitoring, real-time stats, streaming output
+- Controlled entirely by plugin metadata - no hardcoded logic in core
+- Example: `jack monitor stats`, `jack monitor bandwidth wg-proton`
+
+#### Implementing CLI Commands in Plugins
+
+Plugins declare CLI commands in their metadata response:
+
+```go
+func (p *MonitoringRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse, error) {
+    return plugins.MetadataResponse{
+        Namespace:   "monitoring",
+        Version:     "1.0.0",
+        Description: "System monitoring plugin",
+        ConfigPath:  "/etc/jack/monitoring.json",
+        CLICommands: []plugins.CLICommand{
+            {
+                Name:         "monitor",
+                Short:        "Monitor system resources and network bandwidth",
+                Long:         "Display real-time system metrics including CPU, memory, load, and network bandwidth.",
+                Subcommands:  []string{"stats", "bandwidth"},
+                Continuous:   true,         // Mark as continuous command
+                PollInterval: 2,            // Poll every 2 seconds (default: 2)
+            },
+        },
+    }, nil
+}
+```
+
+The plugin must also implement the `ExecuteCLICommand()` RPC method:
+
+```go
+func (p *MonitoringRPCProvider) ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error) {
+    // Parse command string (e.g., "monitor stats" or "monitor bandwidth")
+    parts := strings.Fields(command)
+
+    switch parts[1] {
+    case "stats":
+        return p.executeStats()
+    case "bandwidth":
+        return p.executeBandwidth(args)
+    default:
+        return nil, fmt.Errorf("unknown subcommand: %s", parts[1])
+    }
+}
+```
+
+#### Continuous Commands Architecture
+
+The continuous command system is **completely metadata-driven**:
+
+1. **Plugin Declaration**: Plugin sets `Continuous: true` in CLI command metadata
+2. **Core Detection**: CLI automatically detects continuous commands via metadata
+3. **Polling Loop**: CLI implements generic polling loop with screen refresh
+4. **Custom Interval**: Plugin can specify poll interval (default: 2 seconds)
+
+**Implementation Files**:
+- [plugins/rpc.go:52-60](plugins/rpc.go#L52-L60) - `CLICommand` struct with `Continuous` and `PollInterval` fields
+- [cmd/plugin_commands.go:137-146](cmd/plugin_commands.go#L137-L146) - Metadata-driven detection logic
+- [cmd/plugin_commands.go:167-192](cmd/plugin_commands.go#L167-L192) - Generic `executeContinuousCommand()` function
+
+**Benefits**:
+- Zero hardcoded command checks in core
+- Any plugin can implement continuous commands
+- Flexible per-command poll intervals
+- Clean separation: core handles polling, plugin handles output formatting
+
+#### Adding CLI Commands to a Plugin
+
+To add CLI commands to your plugin:
+
+1. **Extend Metadata**: Add `CLICommands` array to your `MetadataResponse`
+   ```go
+   CLICommands: []plugins.CLICommand{
+       {
+           Name:         "mycmd",
+           Short:        "Short description",
+           Long:         "Long description",
+           Subcommands:  []string{"sub1", "sub2"}, // Optional
+           Continuous:   false,  // true for live polling commands
+           PollInterval: 2,      // Only used if Continuous is true
+       },
+   }
+   ```
+
+2. **Implement ExecuteCLICommand**: Handle command execution in your RPC provider
+   ```go
+   func (p *MyRPCProvider) ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error) {
+       // Parse command and return formatted output
+       return []byte("command output"), nil
+   }
+   ```
+
+3. **Format Output**: Return plain text or formatted output
+   - One-off commands: Output printed once, then CLI exits
+   - Continuous commands: Output refreshed every poll interval with screen clear
+
+4. **Test**: Commands appear automatically in `jack --help` after plugin loads
+
+**Example Plugins with CLI Commands**:
+- **monitoring** - `jack monitor stats` (continuous), `jack monitor bandwidth <iface>` (continuous)
+
+### Plugin Communication Flow
+
+```
+User CLI Command
+    ↓
+Unix Socket → Daemon
+    ↓
+Daemon loads/validates config
+    ↓
+RPC Call → Plugin Process
+    ↓
+Plugin applies config to system
+    ↓
+Response ← Plugin
+    ↓
+Result ← Daemon
+    ↓
+User sees output
+```
+
+### Default Config Design Pattern
+
+When designing a plugin with default config:
+
+1. **Keep defaults minimal** - Only include essential settings
+2. **Make them safe** - Defaults should not disrupt the system
+3. **Document behavior** - Clearly indicate what the defaults do
+4. **Allow overrides** - Users can always provide their own config file
+
+**Good Example**: Monitoring plugin defaults to `{"enabled": true}` - passive observation, no system changes
+
+**Bad Example**: Firewall plugin with default DROP policy - could lock users out
+
+## Development Guidelines
+
+### Backwards Compatibility
+
+**IGNORE BACKWARDS COMPATIBILITY.** This is an internal tool under active development. Breaking changes are acceptable and preferred over maintaining legacy code. Always prioritize:
+- Clean, maintainable code
+- Modern Go idioms
+- Simplicity over compatibility
+
+### Task Estimation
+
+**NEVER provide time estimates for completing tasks.** Do not say things like:
+- "This will take about 5 minutes"
+- "Should be quick"
+- "This is a 2-hour task"
+- "Estimated completion time: 30 minutes"
+
+**Rationale:**
+- Time estimates are frequently inaccurate and set false expectations
+- Software development has unpredictable complexity
+- Focus should be on quality and correctness, not speed
+- User can observe progress through actual work completed
+
+**What to do instead:**
+- Start working on the task immediately
+- Provide progress updates as you complete steps
+- Use the TodoWrite tool to track multi-step tasks
+- Let completed work speak for itself
+
+### Git Workflow
+
+**IMPORTANT: Claude should NEVER create git commits.** All git commits must be done manually by the user.
+
+**Rationale:**
+- User maintains full control over commit history
+- User can review all changes before committing
+- User can write appropriate commit messages
+- Prevents automatic commits that may bundle unrelated changes
+
+**What Claude CAN do:**
+- Run read-only git commands (`git status`, `git log`, `git diff`)
+- Suggest commit messages for user to use manually
+- Review changes before user commits
+- Build and test code without committing
+
+**What Claude CANNOT do:**
+- Run `git add`, `git commit`, `git push`
+- Modify `.git/` directory
+- Create branches or tags
+- Any command that modifies git repository state
+
+When code changes are complete and ready for version control, inform the user and let them handle commits manually.
+
+### Licensing
+
+**All Go source files must include the GPL 2.0 header:**
+
+```go
+// Copyright (C) 2025 Mono Technologies Inc.
+//
+// This program is free software; you can redistribute it and/or
+// modify it under the terms of the GNU General Public License
+// as published by the Free Software Foundation; version 2.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU General Public License for more details.
+```
+
+Place this header at the top of every `.go` file before the package documentation. When creating new Go files, always include this header first.
+
+### Code Quality Checks
+
+**Run these checks periodically** (at minimum before major commits):
+
+```bash
+# Linter (golangci-lint)
+make lint
+# or directly:
+~/go/bin/golangci-lint run
+
+# Deadcode detection
+make deadcode
+# or directly:
+~/go/bin/deadcode ./...
+
+# Unused code detection
+make lint-unused
+```
+
+Fix all issues reported by these tools. Remove dead code immediately rather than commenting it out.
+
+### Build Process
+
+Cross-compilation for arm64 target:
+```bash
+# Main daemon
+GOOS=linux GOARCH=arm64 go build -o jack
+
+# Plugins (must match target architecture)
+GOOS=linux GOARCH=arm64 go build -o jack-plugin-nftables plugins/core/nftables/*.go
+GOOS=linux GOARCH=arm64 go build -o jack-plugin-dnsmasq plugins/core/dnsmasq/*.go
+GOOS=linux GOARCH=arm64 go build -o jack-plugin-wireguard plugins/core/wireguard/*.go
+```
+
+Or use the build script:
+```bash
+./build.sh
+```
+
+### Testing
+
+```bash
+# Run unit tests
+go test ./...
+
+# Run integration tests (ALWAYS use docker with sg command)
+sg docker -c "make test-integration"
+
+# With coverage
+make coverage
+```
+
+**IMPORTANT**: Integration tests require privileged operations (netlink, sysctl, root access) and MUST be run in Docker. Always use `sg docker -c "make test-integration"` to run integration tests.
+
+**CRITICAL Docker Configuration**:
+- **NEVER use `--network host` when running integration tests in Docker**
+- The Makefile uses the correct configuration: `--privileged --cap-add=ALL` with default Docker networking
+- Jack uses Unix domain sockets (filesystem-based), not network sockets, so `--network host` is unnecessary and breaks test isolation
+- Using `--network host` bypasses Docker's network isolation and causes test failures
+- Always follow the Makefile's Docker configuration exactly
+
+**CRITICAL**: Always run integration tests before reporting success on any code changes or test additions. Integration tests verify the entire system works correctly and must pass before considering work complete.
+
+```bash
+# Before reporting success, ALWAYS run:
+sg docker -c "make coverage-integration"
+```
+
+When testing new functionality, prefer using CLI commands when possible:
+```bash
+# Use Jack CLI for direct testing (if applicable)
+jack set <component> <config>
+
+# Example: Testing network configuration
+jack set interfaces '{"br-lan": {"type": "bridge", "members": ["lan1", "lan2"]}}'
+
+# Example: Testing firewall changes
+jack set firewall '{"zones": {"wan": {"interfaces": ["eth0"]}}}'
+```
+
+Using `jack set` provides immediate feedback and validates the entire configuration pipeline (parsing, validation, application) in one step. Only use direct system commands (e.g., `ip`, `nft`, `echo > /sys/`) when testing low-level functionality or debugging specific issues.
+
+### Test Quality Standards
+
+**CRITICAL RULE: ALL TESTS MUST PASS.**
+
+Having failing tests defeats the entire purpose of testing. Tests exist to verify that code works correctly. If tests are failing:
+1. **Fix the code** - The test is revealing a bug that must be fixed
+2. **Fix the test** - The test itself may be incorrect or outdated
+3. **Delete the test** - If it's testing something no longer relevant
+
+**NEVER commit or leave failing tests in the codebase.** A failing test is worse than no test because:
+- It creates noise that hides real failures
+- It trains developers to ignore test failures
+- It provides false confidence ("we have tests")
+- It makes the test suite unreliable
+
+**Before completing ANY work:**
+```bash
+# All tests must pass
+sg docker -c "make test-integration"
+```
+
+If integration tests fail, the work is NOT complete. Period.
+
+**CRITICAL RULE: Never use `t.Skip()` in tests.**
+
+Tests should either run properly or not exist at all. A test that always skips provides a false sense of coverage and misleads developers about the true state of testing.
+
+**If you encounter dependencies that prevent testing:**
+1. **Mock the dependency** - Create interfaces and inject mocks (preferred approach)
+2. **Move to integration tests** - If the test truly requires system resources
+3. **Delete the test** - If it cannot be made to run and provides no value
+
+**Examples of proper handling:**
+
+```go
+// ❌ BAD: Test that always skips
+func TestApplyInterfaceConfig(t *testing.T) {
+    t.Skip("Requires netlink mock or integration test environment")
+    // Test code that never runs
+}
+
+// ✅ GOOD: Extract testable logic with interface
+type NetworkManager interface {
+    LinkByName(name string) (netlink.Link, error)
+}
+
+func TestApplyInterfaceConfig(t *testing.T) {
+    mockNet := &MockNetworkManager{
+        links: map[string]netlink.Link{
+            "eth0": &mockLink{name: "eth0"},
+        },
+    }
+
+    err := ApplyInterfaceConfig(mockNet, "eth0", config)
+    assert.NoError(t, err)
+}
+```
+
+**Test coverage goals:**
+- Pure business logic: 100% coverage via unit tests
+- I/O-heavy code: Tested via integration tests or mocked interfaces
+- Every test must actually execute - no skipped tests allowed
+
+**CRITICAL RULE: Never split success and failure cases between unit and integration tests.**
+
+A test that only validates failure cases with success cases "covered elsewhere" is incomplete and misleading. Each test should be self-contained and test both success and failure paths, or not exist at all.
+
+**Anti-pattern to avoid:**
+
+```go
+// ❌ BAD: Incomplete test that only checks failures
+func TestApplyVLANInterface_Validation(t *testing.T) {
+    tests := []struct {
+        name        string
+        expectError bool
+        errorMsg    string
+    }{
+        {"missing parent", true, "parent device not specified"},
+        {"valid config", false, ""}, // This case never actually runs
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            if !tt.expectError {
+                return // Success cases covered by integration tests
+            }
+            err := applyVLANInterface(tt.iface)
+            require.Error(t, err)
+            assert.Contains(t, err.Error(), tt.errorMsg)
+        })
+    }
+}
+```
+
+**Why this is wrong:**
+- Creates false sense of coverage (appears to test success, but doesn't)
+- Splits testing responsibility across files (unit for failures, integration for success)
+- Makes refactoring harder (need to check multiple test files)
+- Violates single responsibility (test should be complete)
+
+**Correct approaches:**
+
+1. **Delete the test** if it only validates trivial input parsing and integration tests cover the complete behavior:
+```go
+// Just delete the incomplete unit test entirely
+// Integration tests in test/integration/vlan_test.go already cover this
+```
+
+2. **Mock dependencies** to test both success AND failure in the same unit test:
+```go
+// ✅ GOOD: Complete unit test with mocked dependencies
+func TestApplyVLANInterface(t *testing.T) {
+    tests := []struct {
+        name        string
+        mockNet     *MockNetlink
+        expectError bool
+        errorMsg    string
+    }{
+        {
+            name: "missing parent device",
+            mockNet: &MockNetlink{},
+            expectError: true,
+            errorMsg: "parent device not specified",
+        },
+        {
+            name: "successful VLAN creation",
+            mockNet: &MockNetlink{
+                links: map[string]netlink.Link{
+                    "eth0": &mockLink{name: "eth0"},
+                },
+            },
+            expectError: false,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := applyVLANInterface(tt.mockNet, tt.iface)
+            if tt.expectError {
+                require.Error(t, err)
+                assert.Contains(t, err.Error(), tt.errorMsg)
+            } else {
+                assert.NoError(t, err)
+            }
+        })
+    }
+}
+```
+
+3. **Integration test only** for I/O-heavy functions where mocking provides minimal value:
+```go
+// No unit test - just comprehensive integration tests
+// See test/integration/vlan_test.go for complete coverage
+```
+
+**Decision criteria:**
+- **Delete unit test**: Function is I/O-heavy, integration tests are comprehensive, only trivial validation logic
+- **Mock dependencies**: Function has business logic worth testing, abstraction layer exists or is worth creating
+- **Integration only**: Function is thin wrapper around system calls, mocking effort > value gained
+
+### Integration Test Best Practices
+
+**CRITICAL: Environment Variable Race Conditions**
+
+When testing daemon components that use environment variables (like socket paths), always use the test harness's stored values instead of calling getter functions:
+
+```go
+// ❌ BAD: Environment variable may have changed
+socketPath := daemon.GetSocketPath()
+assert.NoFileExists(t, socketPath)
+
+// ✅ GOOD: Use the harness's stored socket path
+socketPath := harness.socketPath
+assert.NoFileExists(t, socketPath)
+```
+
+**Why**: The `GetSocketPath()` function reads `JACK_SOCKET_PATH` at call time, which may have been modified by cleanup routines or other tests. The test harness stores the actual path configured for each test instance.
+
+**CRITICAL: Async Goroutine Cleanup**
+
+When testing graceful shutdown or cleanup operations that run in separate goroutines, allow time for async operations to complete:
+
+```go
+// ❌ BAD: Checking immediately after shutdown signal
+cancel()
+select {
+case <-serverDone:
+    t.Log("Server shut down")
+}
+assert.NoFileExists(t, socketPath) // May fail due to race condition
+
+// ✅ GOOD: Allow time for Stop() to complete
+cancel()
+select {
+case <-serverDone:
+    t.Log("Server shut down")
+}
+time.Sleep(100 * time.Millisecond) // Let Stop() finish cleanup
+assert.NoFileExists(t, socketPath)
+```
+
+**Why**: When context is canceled, the `Stop()` method runs in a monitoring goroutine (e.g., `harness.go:151-154`). Even though `Start()` returns, `Stop()` may still be executing cleanup operations like socket removal.
+
+**CRITICAL: Test Harness Usage**
+
+Integration tests should use the `TestHarness` pattern for proper test isolation:
+
+```go
+func TestSomeFeature(t *testing.T) {
+    harness := NewTestHarness(t)
+    defer harness.Cleanup()
+
+    // Use harness methods for setup
+    harness.CreateDummyInterface("eth0")
+
+    // Start daemon through harness
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+    go harness.StartDaemon(ctx)
+    harness.WaitForDaemon(5 * time.Second)
+
+    // Use harness.socketPath for daemon communication
+    // Use harness.configDir for config files
+}
+```
+
+**Benefits**:
+- Isolated config directories per test
+- Automatic cleanup of interfaces and sockets
+- Consistent environment variable management
+- Proper daemon lifecycle handling
+
+## Common Pitfalls
+
+### Plugin Architecture Issues
+
+1. **Wrong architecture**: Always build plugins with `GOOS=linux GOARCH=arm64` for the target device
+2. **Missing routes**: WireGuard allowed-ips don't automatically create routes - plugins must add them via netlink
+3. **Command splitting**: When using `exec.Command()` with special characters (braces, quotes), pass arguments separately, not via `strings.Split()`
+
+### Firewall Configuration
+
+- Base chains (INPUT, OUTPUT, FORWARD) need netfilter hooks to actually process packets
+- Zone chains dispatch from base chains and handle zone-specific policies
+- Masquerading on VPN client interfaces breaks source IP visibility - only masquerade on outbound zones
+
+## Important Files
+
+- `/etc/jack/*.json` - Plugin configuration files
+- `/var/run/jack.sock` - Unix socket for daemon communication
+- `/var/run/jack.pid` - Daemon PID file
+- `/usr/lib/jack/plugins/` - Plugin binaries location
+- `/var/log/jack/jack.log` - Daemon log file
+
+## DO NOT EDIT THIS FILE
+
+**Unless explicitly instructed by the user, DO NOT modify CLAUDE.md.** This file serves as the persistent development guide and should only be updated when project architecture or development practices fundamentally change.

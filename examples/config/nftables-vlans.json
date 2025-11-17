@@ -1,0 +1,173 @@
+{
+  "version": "1",
+  "enabled": true,
+  "defaults": {
+    "input": "DROP",
+    "forward": "DROP",
+    "output": "ACCEPT",
+    "syn_flood": true,
+    "drop_invalid": true
+  },
+  "zones": {
+    "wan": {
+      "name": "wan",
+      "interfaces": ["fm1-mac9"],
+      "input": "DROP",
+      "forward": "DROP",
+      "output": "ACCEPT",
+      "masquerade": true,
+      "mtu_fix": true,
+      "family": "ipv4",
+      "comment": "WAN zone with NAT"
+    },
+    "lan": {
+      "name": "lan",
+      "interfaces": ["br-lan"],
+      "input": "ACCEPT",
+      "forward": "ACCEPT",
+      "output": "ACCEPT",
+      "masquerade": false,
+      "family": "ipv4",
+      "comment": "Trusted LAN zone - full access"
+    },
+    "guest": {
+      "name": "guest",
+      "interfaces": ["fm1-mac6.10"],
+      "input": "DROP",
+      "forward": "DROP",
+      "output": "ACCEPT",
+      "masquerade": false,
+      "family": "ipv4",
+      "comment": "Guest zone - isolated, internet only"
+    },
+    "iot": {
+      "name": "iot",
+      "interfaces": ["fm1-mac6.20"],
+      "input": "DROP",
+      "forward": "DROP",
+      "output": "ACCEPT",
+      "masquerade": false,
+      "family": "ipv4",
+      "comment": "IoT zone - isolated, internet only"
+    },
+    "management": {
+      "name": "management",
+      "interfaces": ["fm1-mac6.99"],
+      "input": "ACCEPT",
+      "forward": "DROP",
+      "output": "ACCEPT",
+      "masquerade": false,
+      "family": "ipv4",
+      "comment": "Management zone - LAN can access"
+    }
+  },
+  "forwardings": [
+    {
+      "src": "lan",
+      "dest": "wan",
+      "family": "ipv4",
+      "comment": "LAN to internet"
+    },
+    {
+      "src": "lan",
+      "dest": "guest",
+      "family": "ipv4",
+      "comment": "LAN can access guest (for management)"
+    },
+    {
+      "src": "lan",
+      "dest": "iot",
+      "family": "ipv4",
+      "comment": "LAN can access IoT (for management)"
+    },
+    {
+      "src": "lan",
+      "dest": "management",
+      "family": "ipv4",
+      "comment": "LAN can access management VLAN"
+    },
+    {
+      "src": "guest",
+      "dest": "wan",
+      "family": "ipv4",
+      "comment": "Guest to internet only - isolated from LAN"
+    },
+    {
+      "src": "iot",
+      "dest": "wan",
+      "family": "ipv4",
+      "comment": "IoT to internet only - isolated from LAN"
+    }
+  ],
+  "rules": [
+    {
+      "name": "Allow-Established-Related-Input",
+      "src": "wan",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow established connections from WAN"
+    },
+    {
+      "name": "Allow-Established-Related-Forward",
+      "src": "wan",
+      "dest": "forward",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow established connections forwarding"
+    },
+    {
+      "name": "Allow-ICMP",
+      "src": "wan",
+      "proto": "icmp",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow ping from WAN"
+    },
+    {
+      "name": "Allow-SSH",
+      "src": "wan",
+      "proto": "tcp",
+      "dest_port": "22",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow SSH from WAN"
+    },
+    {
+      "name": "Guest-Allow-DHCP",
+      "src": "guest",
+      "proto": "udp",
+      "dest_port": "67-68",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow DHCP on guest network"
+    },
+    {
+      "name": "Guest-Allow-DNS",
+      "src": "guest",
+      "proto": "udp",
+      "dest_port": "53",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow DNS on guest network"
+    },
+    {
+      "name": "IoT-Allow-DHCP",
+      "src": "iot",
+      "proto": "udp",
+      "dest_port": "67-68",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow DHCP on IoT network"
+    },
+    {
+      "name": "IoT-Allow-DNS",
+      "src": "iot",
+      "proto": "udp",
+      "dest_port": "53",
+      "target": "ACCEPT",
+      "family": "ipv4",
+      "comment": "Allow DNS on IoT network"
+    }
+  ],
+  "port_forwards": []
+}

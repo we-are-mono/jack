@@ -1,0 +1,48 @@
+{
+  "version": "1",
+  "routes": {
+    "default-route": {
+      "name": "default-route",
+      "destination": "default",
+      "gateway": "10.0.0.1",
+      "interface": "wan",
+      "metric": 100,
+      "enabled": true,
+      "comment": "Default route via WAN gateway"
+    },
+    "internal-network": {
+      "name": "internal-network",
+      "destination": "10.0.0.0/8",
+      "gateway": "192.168.1.254",
+      "metric": 10,
+      "enabled": true,
+      "comment": "Route to internal corporate network"
+    },
+    "vpn-network": {
+      "name": "vpn-network",
+      "destination": "172.16.0.0/12",
+      "interface": "wg0",
+      "metric": 20,
+      "enabled": true,
+      "comment": "Route VPN traffic through WireGuard interface"
+    },
+    "guest-network": {
+      "name": "guest-network",
+      "destination": "192.168.100.0/24",
+      "gateway": "192.168.1.100",
+      "interface": "lan",
+      "metric": 50,
+      "enabled": true,
+      "comment": "Route to guest network segment"
+    },
+    "backup-route": {
+      "name": "backup-route",
+      "destination": "0.0.0.0/0",
+      "gateway": "192.168.2.1",
+      "interface": "wan2",
+      "metric": 200,
+      "enabled": false,
+      "comment": "Backup default route (disabled unless needed)"
+    }
+  }
+}

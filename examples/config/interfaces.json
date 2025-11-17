@@ -1,0 +1,34 @@
+{
+  "version": "1",
+  "interfaces": {
+    "wan": {
+      "type": "physical",
+      "device_name": "fm1-mac9",
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "10.0.0.199",
+      "netmask": "255.255.255.0",
+      "gateway": "10.0.0.1",
+      "metric": 100,
+      "mtu": 1500,
+      "ipv6": {
+        "enabled": true,
+        "protocol": "dhcpv6"
+      },
+      "comment": "WAN port - static IP configuration"
+    },
+    "lan": {
+      "type": "bridge",
+      "device_name": "br-lan",
+      "bridge_ports": ["fm1-mac2", "fm1-mac5", "fm1-mac6"],
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.1.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1500,
+      "bridge_stp": false,
+      "bridge_forward_delay": 2,
+      "comment": "LAN bridge with 3 ports"
+    }
+  }
+}

@@ -1,0 +1,146 @@
+{
+  "version": "1",
+  "enabled": true,
+  "defaults": {
+    "input": "DROP",
+    "forward": "DROP",
+    "output": "ACCEPT",
+    "syn_flood": true,
+    "drop_invalid": true
+  },
+  "zones": {
+    "wan": {
+      "name": "wan",
+      "interfaces": ["fm1-mac9"],
+      "input": "DROP",
+      "forward": "DROP",
+      "output": "ACCEPT",
+      "masquerade": true,
+      "mtu_fix": true,
+      "family": "ipv4",
+      "comment": "WAN zone with NAT"
+    },
+    "lan": {
+      "name": "lan",
+      "interfaces": ["br-lan"],
+      "input": "ACCEPT",
+      "forward": "ACCEPT",
+      "output": "ACCEPT",
+      "masquerade": false,
+      "family": "ipv4",
+      "comment": "LAN zone"
+    }
+  },
+  "forwardings": [
+    {
+      "src": "lan",
+      "dest": "wan",
+      "family": "ipv4",
+      "comment": "LAN to WAN forwarding"
+    }
+  ],
+  "rules": [
+    {
+      "name": "Allow-Established-Related-Input",
+      "src": "wan",
+      "target": "ACCEPT",
+      "family": "ipv4"
+    },
+    {
+      "name": "Allow-Established-Related-Forward",
+      "src": "wan",
+      "dest": "forward",
+      "target": "ACCEPT",
+      "family": "ipv4"
+    },
+    {
+      "name": "Allow-ICMP",
+      "src": "wan",
+      "proto": "icmp",
+      "target": "ACCEPT",
+      "family": "ipv4"
+    },
+    {
+      "name": "Allow-SSH",
+      "src": "wan",
+      "proto": "tcp",
+      "dest_port": "22",
+      "target": "ACCEPT",
+      "family": "ipv4"
+    }
+  ],
+  "port_forwards": [
+    {
+      "name": "HTTP-Server",
+      "src": "wan",
+      "dest": "lan",
+      "proto": "tcp",
+      "src_dport": "80",
+      "dest_ip": "192.168.1.10",
+      "dest_port": "80",
+      "target": "DNAT",
+      "enabled": true,
+      "comment": "Forward HTTP to internal web server"
+    },
+    {
+      "name": "HTTPS-Server",
+      "src": "wan",
+      "dest": "lan",
+      "proto": "tcp",
+      "src_dport": "443",
+      "dest_ip": "192.168.1.10",
+      "dest_port": "443",
+      "target": "DNAT",
+      "enabled": true,
+      "comment": "Forward HTTPS to internal web server"
+    },
+    {
+      "name": "SSH-Server",
+      "src": "wan",
+      "dest": "lan",
+      "proto": "tcp",
+      "src_dport": "2222",
+      "dest_ip": "192.168.1.10",
+      "dest_port": "22",
+      "target": "DNAT",
+      "enabled": true,
+      "comment": "Forward external port 2222 to internal SSH on port 22"
+    },
+    {
+      "name": "Minecraft-Server",
+      "src": "wan",
+      "dest": "lan",
+      "proto": "tcp",
+      "src_dport": "25565",
+      "dest_ip": "192.168.1.20",
+      "dest_port": "25565",
+      "target": "DNAT",
+      "enabled": true,
+      "comment": "Forward Minecraft server"
+    },
+    {
+      "name": "FTP-Server",
+      "src": "wan",
+      "dest": "lan",
+      "proto": "tcp",
+      "src_dport": "21",
+      "dest_ip": "192.168.1.30",
+      "dest_port": "21",
+      "target": "DNAT",
+      "enabled": false,
+      "comment": "FTP server (disabled by default)"
+    },
+    {
+      "name": "VNC-Server",
+      "src": "wan",
+      "dest": "lan",
+      "proto": "tcp",
+      "src_dport": "5900",
+      "dest_ip": "192.168.1.15",
+      "dest_port": "5900",
+      "target": "DNAT",
+      "enabled": true,
+      "comment": "VNC remote desktop"
+    }
+  ]
+}

@@ -1,0 +1,61 @@
+# Jack-generated dnsmasq configuration
+# DO NOT EDIT - This file is managed by Jack
+
+# Basic DNS settings - always use port 53
+port=53
+
+{{- if .Config.Server.Domain }}
+# Domain settings
+domain={{ .Config.Server.Domain }}
+local=/{{ .Config.Server.Domain }}/
+expand-hosts
+{{- end }}
+
+# DHCP lease file
+{{- if .Config.Server.LeaseFile }}
+dhcp-leasefile={{ .Config.Server.LeaseFile }}
+{{- end }}
+
+# Server behavior
+{{- if .Config.Server.Authoritative }}
+dhcp-authoritative
+{{- end }}
+
+{{- if .Config.Server.LogDHCP }}
+log-dhcp
+{{- end }}
+
+# Basic security
+localise-queries
+stop-dns-rebind
+rebind-localhost-ok
+bogus-priv
+
+# Don't read /etc/hosts (we manage DNS records explicitly)
+no-hosts
+
+# DHCP pools
+{{- range $name, $pool := .Config.DHCPPools }}
+{{- if eq $pool.DHCPv4 "server" }}
+{{- $device := index $.InterfaceDevices $pool.Interface }}
+{{- $ip := index $.InterfaceIPs $pool.Interface }}
+{{- if and $device $ip }}
+{{- $network := call $.NetworkPortion $ip }}
+
+# {{ $pool.Interface }} - {{ $pool.Comment }}
+interface={{ $device }}
+dhcp-range={{ $device }},{{ $network }}.{{ $pool.Start }},{{ $network }}.{{ add $pool.Start $pool.Limit }},{{ $pool.LeaseTime }}
+{{- range $pool.DNS }}
+dhcp-option={{ $device }},6,{{ . }}
+{{- end }}
+{{- if $pool.Domain }}
+dhcp-option={{ $device }},15,{{ $pool.Domain }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+# Static DHCP leases
+{{- range .Config.StaticLeases }}
+dhcp-host={{ .MAC }},{{ .IP }}{{- if .Name }},{{ .Name }}{{- end }}  # {{ .Comment }}
+{{- end }}

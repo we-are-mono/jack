@@ -1,0 +1,68 @@
+{
+  "version": "1",
+  "enabled": true,
+  "defaults": {
+    "input": "DROP",
+    "forward": "DROP",
+    "output": "ACCEPT",
+    "syn_flood": true,
+    "drop_invalid": true
+  },
+  "zones": {
+    "wan": {
+      "name": "wan",
+      "interfaces": ["fm1-mac9"],
+      "input": "DROP",
+      "forward": "DROP",
+      "output": "ACCEPT",
+      "masquerade": true,
+      "mtu_fix": true,
+      "family": "ipv4",
+      "comment": "WAN zone with NAT"
+    },
+    "lan": {
+      "name": "lan",
+      "interfaces": ["br-lan"],
+      "input": "ACCEPT",
+      "forward": "ACCEPT",
+      "output": "ACCEPT",
+      "masquerade": false,
+      "family": "ipv4",
+      "comment": "LAN zone"
+    }
+  },
+  "forwardings": [
+    {
+      "src": "lan",
+      "dest": "wan",
+      "family": "ipv4",
+      "comment": "LAN to WAN forwarding"
+    }
+  ],
+  "rules": [
+    {
+      "name": "allow-icmp-wan",
+      "src": "wan",
+      "proto": "icmp",
+      "target": "ACCEPT",
+      "family": "ipv4"
+    },
+    {
+      "name": "allow-dhcp-wan",
+      "src": "wan",
+      "proto": "udp",
+      "dest_port": "68",
+      "target": "ACCEPT",
+      "family": "ipv4"
+    },
+    {
+      "name": "allow-ssh-lan",
+      "src": "lan",
+      "proto": "tcp",
+      "dest_port": "22",
+      "target": "ACCEPT",
+      "family": "ipv4"
+    }
+  ],
+  "port_forwards": []
+}

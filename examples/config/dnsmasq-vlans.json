@@ -1,0 +1,83 @@
+{
+  "version": "1",
+  "server": {
+    "enabled": true,
+    "domain": "home.lan",
+    "leasefile": "/var/lib/misc/dnsmasq.leases",
+    "authoritative": true,
+    "log_dhcp": true,
+    "comment": "Combined DHCP and DNS server for VLANs"
+  },
+  "dhcp_pools": {
+    "lan": {
+      "interface": "lan",
+      "start": 100,
+      "limit": 150,
+      "leasetime": "12h",
+      "dhcpv4": "server",
+      "dhcpv6": "disabled",
+      "ra": "disabled",
+      "ra_management": 0,
+      "ra_default": 0,
+      "dns": ["192.168.1.1"],
+      "domain": "lan",
+      "comment": "Main LAN DHCP pool - trusted devices"
+    },
+    "guest": {
+      "interface": "guest",
+      "start": 100,
+      "limit": 50,
+      "leasetime": "2h",
+      "dhcpv4": "server",
+      "dhcpv6": "disabled",
+      "ra": "disabled",
+      "ra_management": 0,
+      "ra_default": 0,
+      "dns": ["192.168.10.1"],
+      "domain": "guest",
+      "comment": "Guest network - short leases, isolated from LAN"
+    },
+    "iot": {
+      "interface": "iot",
+      "start": 100,
+      "limit": 100,
+      "leasetime": "24h",
+      "dhcpv4": "server",
+      "dhcpv6": "disabled",
+      "ra": "disabled",
+      "ra_management": 0,
+      "ra_default": 0,
+      "dns": ["192.168.20.1"],
+      "domain": "iot",
+      "comment": "IoT devices - isolated from main network"
+    },
+    "management": {
+      "interface": "management",
+      "start": 10,
+      "limit": 20,
+      "leasetime": "24h",
+      "dhcpv4": "server",
+      "dhcpv6": "disabled",
+      "ra": "disabled",
+      "ra_management": 0,
+      "ra_default": 0,
+      "dns": ["192.168.99.1"],
+      "domain": "mgmt",
+      "comment": "Management network - network equipment only"
+    }
+  },
+  "static_leases": [
+    {
+      "name": "server",
+      "mac": "aa:bb:cc:dd:ee:01",
+      "ip": "192.168.1.10",
+      "comment": "Main server - static IP"
+    },
+    {
+      "name": "switch",
+      "mac": "aa:bb:cc:dd:ee:02",
+      "ip": "192.168.99.10",
+      "comment": "Managed switch - management VLAN"
+    }
+  ]
+}

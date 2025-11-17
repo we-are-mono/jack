@@ -1,0 +1,58 @@
+{
+  "version": "1",
+  "interfaces": {
+    "wan": {
+      "type": "physical",
+      "device_name": "eth0",
+      "enabled": true,
+      "protocol": "dhcp",
+      "mtu": 1500,
+      "comment": "WAN port - DHCP configuration"
+    },
+    "lan": {
+      "type": "bridge",
+      "device_name": "br-lan",
+      "bridge_ports": ["eth1", "eth2"],
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "192.168.1.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1500,
+      "bridge_stp": false,
+      "bridge_forward_delay": 2,
+      "comment": "LAN bridge"
+    },
+    "wg0": {
+      "type": "wireguard",
+      "device_name": "wg0",
+      "enabled": true,
+      "protocol": "static",
+      "ipaddr": "10.8.0.1",
+      "netmask": "255.255.255.0",
+      "mtu": 1420,
+      "wg_private_key": "REPLACE_WITH_SERVER_PRIVATE_KEY",
+      "wg_listen_port": 51820,
+      "wg_peers": [
+        {
+          "public_key": "REPLACE_WITH_CLIENT1_PUBLIC_KEY",
+          "allowed_ips": ["10.8.0.2/32"],
+          "persistent_keepalive": 25,
+          "comment": "Mobile client - Alice"
+        },
+        {
+          "public_key": "REPLACE_WITH_CLIENT2_PUBLIC_KEY",
+          "allowed_ips": ["10.8.0.3/32"],
+          "persistent_keepalive": 25,
+          "comment": "Laptop - Bob"
+        },
+        {
+          "public_key": "REPLACE_WITH_CLIENT3_PUBLIC_KEY",
+          "allowed_ips": ["10.8.0.4/32"],
+          "persistent_keepalive": 25,
+          "comment": "Work laptop - Carol"
+        }
+      ],
+      "comment": "WireGuard VPN server for road warriors"
+    }
+  }
+}

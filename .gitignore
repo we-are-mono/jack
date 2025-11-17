@@ -1,0 +1,97 @@
+# Binaries
+jack
+jack-plugin-*
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go build artifacts
+*.test
+*.out
+*.prof
+coverage.txt
+coverage.html
+
+# Go vendor
+vendor/
+
+# Debian packaging artifacts
+debian/jack/
+debian/.debhelper/
+debian/files
+debian/debhelper-build-stamp
+debian/*.log
+debian/*.substvars
+debian/tmp/
+*.deb
+*.deb.asc
+*.buildinfo
+*.changes
+*.upload
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*.swn
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# Runtime and state files
+*.pid
+*.log
+*.sock
+/var/
+/run/
+
+# Config files in root (for local testing)
+# Don't ignore examples/
+/jack.json
+/firewall.json
+/dhcp.json
+/dns.json
+/routes.json
+/interfaces.json
+
+# Deployment and internal scripts (not ready for public yet)
+deploy*.sh
+internal
+.claude
+
+# Temporary files
+*.tmp
+*.bak
+*.orig
+.#*
+
+# Test coverage
+profile.out
+coverage.out
+coverage*.out
+coverage.html
+coverage-data/
+
+# Documentation builds
+docs/_build/
+docs/.doctrees/
+
+# macOS
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+.directory
+.Trash-*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/

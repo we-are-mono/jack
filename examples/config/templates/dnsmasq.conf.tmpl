@@ -1,0 +1,121 @@
+# Jack-generated dnsmasq configuration
+# DO NOT EDIT - This file is managed by Jack
+
+# Basic DNS/DHCP settings
+port={{ .Config.Dnsmasq.Port }}
+{{- if .Config.Dnsmasq.Domain }}
+domain={{ .Config.Dnsmasq.Domain }}
+{{- end }}
+{{- if .Config.Dnsmasq.Local }}
+local={{ .Config.Dnsmasq.Local }}
+{{- end }}
+{{- if .Config.Dnsmasq.ExpandHosts }}
+expand-hosts
+{{- end }}
+
+# DHCP lease file
+{{- if .Config.Dnsmasq.Leasefile }}
+dhcp-leasefile={{ .Config.Dnsmasq.Leasefile }}
+{{- end }}
+
+# DNS resolution settings
+{{- if .Config.Dnsmasq.NoResolv }}
+no-resolv
+{{- else if .Config.Dnsmasq.Resolvfile }}
+resolv-file={{ .Config.Dnsmasq.Resolvfile }}
+{{- end }}
+
+{{- if .Config.Dnsmasq.LocaliseQueries }}
+localise-queries
+{{- end }}
+
+{{- if .Config.Dnsmasq.Authoritative }}
+dhcp-authoritative
+{{- end }}
+
+{{- if .Config.Dnsmasq.DomainNeeded }}
+domain-needed
+{{- end }}
+
+{{- if .Config.Dnsmasq.BogusPRIV }}
+bogus-priv
+{{- end }}
+
+{{- if .Config.Dnsmasq.Filterwin2k }}
+filterwin2k
+{{- end }}
+
+# Rebind protection
+{{- if .Config.Dnsmasq.RebindProtection }}
+stop-dns-rebind
+{{- if .Config.Dnsmasq.RebindLocalhost }}
+rebind-localhost-ok
+{{- end }}
+{{- end }}
+
+# Logging
+{{- if .Config.Dnsmasq.LogQueries }}
+log-queries
+{{- end }}
+{{- if .Config.Dnsmasq.LogDHCP }}
+log-dhcp
+{{- end }}
+
+# DNS cache and forwarding
+{{- if .Config.Dnsmasq.CacheSize }}
+cache-size={{ .Config.Dnsmasq.CacheSize }}
+{{- end }}
+{{- if .Config.Dnsmasq.DNSForwardMax }}
+dns-forward-max={{ .Config.Dnsmasq.DNSForwardMax }}
+{{- end }}
+
+# Upstream DNS servers
+{{- range .Config.Dnsmasq.Servers }}
+server={{ . }}
+{{- end }}
+
+# DHCP pools
+{{- range $name, $pool := .Config.DHCPPools }}
+{{- if eq $pool.DHCPv4 "server" }}
+{{- $device := index $.InterfaceDevices $pool.Interface }}
+{{- $ip := index $.InterfaceIPs $pool.Interface }}
+{{- if and $device $ip }}
+# {{ $pool.Interface }} - {{ $pool.Comment }}
+interface={{ $device }}
+dhcp-range={{ $device }},{{ $.NetworkPortion $ip }}.{{ $pool.Start }},{{ $.NetworkPortion $ip }}.{{ add $pool.Start $pool.Limit }},{{ $pool.Leasetime }}
+{{- range $pool.DNS }}
+dhcp-option={{ $device }},6,{{ . }}
+{{- end }}
+{{- if $pool.Domain }}
+dhcp-option={{ $device }},15,{{ $pool.Domain }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+# Static DHCP leases
+{{- range .Config.StaticLeases }}
+dhcp-host={{ .MAC }},{{ .IP }}{{- if .Hostname }},{{ .Hostname }}{{- end }}
+{{- end }}
+
+# DNS records
+{{- range .Config.DNSRecords.ARecords }}
+host-record={{ .Name }},{{ .IP }}
+{{- end }}
+
+{{- range .Config.DNSRecords.CNAMERecords }}
+cname={{ .Alias }},{{ .Target }}
+{{- end }}
+
+{{- range .Config.DNSRecords.MXRecords }}
+mx-host={{ .Domain }},{{ .Target }},{{ .Priority }}
+{{- end }}
+
+{{- range .Config.DNSRecords.SRVRecords }}
+srv-host={{ .Service }},{{ .Target }},{{ .Port }},{{ .Priority }},{{ .Weight }}
+{{- end }}
+
+# Don't read /etc/hosts if read_ethers is false
+{{- if not .Config.Dnsmasq.ReadEthers }}
+no-hosts
+{{- end }}
