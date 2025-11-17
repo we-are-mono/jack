@@ -68,14 +68,13 @@ jack get monitoring
 jack get monitoring enabled
 jack get monitoring collection_interval
 jack get led
-jack get led leds
-jack get led leds status:green
-jack get led leds status:green brightness
-jack get led leds status:green trigger
-jack get led leds status:blue
-jack get led leds status:blue brightness
-jack get led leds status:red
-jack get led leds status:white
+jack get led status:green
+jack get led status:green brightness
+jack get led status:green trigger
+jack get led status:blue
+jack get led status:blue brightness
+jack get led status:red
+jack get led status:white
 ```
 
 ### revert
@@ -110,23 +109,11 @@ jack set dhcp enabled true
 jack set vpn enabled true
 jack set monitoring enabled true
 jack set monitoring collection_interval 5
-jack set led leds status:green brightness 255
-jack set led leds status:green trigger none
-jack set led leds status:green trigger timer
-jack set led leds status:green trigger heartbeat
-jack set led leds status:green trigger netdev
-```
-
-### show
-```
-jack show
-jack show interfaces
-jack show routes
-jack show firewall
-jack show dhcp
-jack show vpn
-jack show monitoring
-jack show led
+jack set led status:green brightness 255
+jack set led status:green trigger none
+jack set led status:green trigger timer
+jack set led status:green trigger heartbeat
+jack set led status:green trigger netdev
 ```
 
 ### status
