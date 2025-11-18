@@ -13,49 +13,43 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/we-are-mono/jack/plugins"
 )
 
-// PluginAdapter adapts the nftables provider to the unified Plugin interface.
-// This makes the plugin self-describing and self-contained.
-type PluginAdapter struct {
+// NftablesRPCProvider implements the Provider interface with direct RPC support
+type NftablesRPCProvider struct {
 	provider *NftablesProvider
 }
 
-// NewPluginAdapter creates a new self-contained plugin
-func NewPluginAdapter() (*PluginAdapter, error) {
+// NewNftablesRPCProvider creates a new RPC provider for nftables
+func NewNftablesRPCProvider() (*NftablesRPCProvider, error) {
 	provider, err := NewNftables()
 	if err != nil {
 		return nil, err
 	}
 
-	return &PluginAdapter{
+	return &NftablesRPCProvider{
 		provider: provider,
 	}, nil
 }
 
-// Metadata returns information about what this plugin provides
-func (p *PluginAdapter) Metadata() plugins.PluginMetadata {
-	return plugins.PluginMetadata{
+// Metadata returns plugin information
+func (p *NftablesRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse, error) {
+	return plugins.MetadataResponse{
 		Namespace:   "firewall",
 		Version:     "1.0.0",
 		Description: "nftables-based firewall management",
 		Category:    "firewall",
 		ConfigPath:  "/etc/jack/firewall.json",
-	}
+	}, nil
 }
 
 // ApplyConfig applies firewall configuration
-func (p *PluginAdapter) ApplyConfig(config interface{}) error {
-	// Config comes in as a generic map from JSON unmarshaling
-	// We need to re-marshal and unmarshal to get the right type
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-
+func (p *NftablesRPCProvider) ApplyConfig(ctx context.Context, configJSON []byte) error {
 	var firewallConfig FirewallConfig
 	if err := json.Unmarshal(configJSON, &firewallConfig); err != nil {
 		return err
@@ -70,12 +64,7 @@ func (p *PluginAdapter) ApplyConfig(config interface{}) error {
 }
 
 // ValidateConfig validates firewall configuration
-func (p *PluginAdapter) ValidateConfig(config interface{}) error {
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-
+func (p *NftablesRPCProvider) ValidateConfig(ctx context.Context, configJSON []byte) error {
 	var firewallConfig FirewallConfig
 	if err := json.Unmarshal(configJSON, &firewallConfig); err != nil {
 		return err
@@ -85,26 +74,34 @@ func (p *PluginAdapter) ValidateConfig(config interface{}) error {
 }
 
 // Flush removes all firewall rules
-func (p *PluginAdapter) Flush() error {
+func (p *NftablesRPCProvider) Flush(ctx context.Context) error {
 	return p.provider.Flush()
 }
 
-// Status returns the current firewall status
-func (p *PluginAdapter) Status() (interface{}, error) {
+// Status returns current status as JSON
+func (p *NftablesRPCProvider) Status(ctx context.Context) ([]byte, error) {
 	status, err := p.provider.Status()
 	if err != nil {
 		return nil, err
 	}
 
 	// Return as map for consistent JSON marshaling
-	return map[string]interface{}{
+	statusMap := map[string]interface{}{
 		"enabled":    status.Enabled,
 		"backend":    status.Backend,
 		"rule_count": status.RuleCount,
-	}, nil
+	}
+
+	return json.Marshal(statusMap)
 }
 
-// Close terminates the plugin (no-op for direct plugins)
-func (p *PluginAdapter) Close() error {
-	return nil
+// OnLogEvent is not implemented for the nftables plugin
+func (p *NftablesRPCProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	return fmt.Errorf("plugin does not implement log event handling")
+}
+
+// ExecuteCLICommand executes CLI commands provided by this plugin
+func (p *NftablesRPCProvider) ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error) {
+	// Future: could add commands like "jack firewall list", "jack firewall reload"
+	return nil, fmt.Errorf("plugin does not implement CLI commands")
 }

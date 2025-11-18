@@ -1,6 +1,4 @@
 # Binaries
-jack
-jack-plugin-*
 bin/
 *.exe
 *.exe~

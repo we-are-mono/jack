@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,6 +27,7 @@ import (
 	"github.com/vishvananda/netlink"
 	"github.com/we-are-mono/jack/client"
 	"github.com/we-are-mono/jack/daemon"
+	"github.com/we-are-mono/jack/daemon/logger"
 )
 
 // TestHarness provides isolated test environment for integration tests
@@ -140,15 +140,23 @@ func (h *TestHarness) startDaemonInternal(ctx context.Context, logWriter *bytes.
 		}
 	}
 
-	// Redirect log output if requested
-	if logWriter != nil {
-		log.SetOutput(logWriter)
-		// Restore default log output when context is done
-		go func() {
-			<-ctx.Done()
-			log.SetOutput(os.Stderr)
-		}()
+	// Initialize logger infrastructure (required for structured logging to work)
+	loggerConfig := logger.Config{
+		Level:     "debug",
+		Format:    "json",
+		Component: "daemon",
 	}
+	emitter := logger.NewEmitter()
+
+	// Set up log backends
+	var backends []logger.Backend
+	if logWriter != nil {
+		// For tests: capture logs to buffer
+		bufferBackend := logger.NewBufferBackend(logWriter, "json")
+		backends = []logger.Backend{bufferBackend}
+	}
+
+	logger.Init(loggerConfig, backends, emitter)
 
 	// Create daemon server
 	srv, err := daemon.NewServer()

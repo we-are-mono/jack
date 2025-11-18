@@ -13,11 +13,17 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
+	"syscall"
 
 	"github.com/spf13/cobra"
+	"github.com/we-are-mono/jack/client"
+	"github.com/we-are-mono/jack/daemon"
+	"github.com/we-are-mono/jack/daemon/logger"
 )
 
 var (
@@ -33,12 +39,25 @@ var logsCmd = &cobra.Command{
 	Run:   runLogs,
 }
 
+var logsWatchCmd = &cobra.Command{
+	Use:   "watch [level]",
+	Short: "Watch logs in real-time from Jack daemon",
+	Long:  `Stream logs from Jack daemon in real-time. Optionally filter by log level (debug, info, warn, error, alert).`,
+	Run:   runLogsWatch,
+}
+
 func init() {
 	rootCmd.AddCommand(logsCmd)
+	logsCmd.AddCommand(logsWatchCmd)
 	logsCmd.Flags().BoolVarP(&logsFollow, "follow", "f", false, "Follow log output in real-time")
 	logsCmd.Flags().IntVarP(&logsLines, "lines", "n", 100, "Number of lines to show")
 	logsCmd.Flags().StringVar(&logsSince, "since", "", "Show logs since time (e.g., '1 hour ago', '2024-01-01')")
+
+	// Watch subcommand flags
+	logsWatchCmd.Flags().StringVar(&logsComponent, "component", "", "Filter by component name")
 }
+
+var logsComponent string
 
 func runLogs(cmd *cobra.Command, args []string) {
 	// Check if journalctl is available (systemd)
@@ -118,5 +137,57 @@ func runTailLogs() {
 	if err := execCmd.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] Failed to run tail: %v\n", err)
 		os.Exit(1)
+	}
+}
+
+func runLogsWatch(cmd *cobra.Command, args []string) {
+	// Build filter from arguments and flags
+	filter := &daemon.LogFilter{
+		Component: logsComponent,
+	}
+
+	// If first argument is provided, use it as level filter
+	if len(args) > 0 {
+		filter.Level = args[0]
+	}
+
+	// Set up signal handling for Ctrl+C
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	// Channel to signal completion
+	done := make(chan error, 1)
+
+	// Start streaming logs in background
+	go func() {
+		err := client.StreamLogs(filter, func(logData []byte) error {
+			// Parse log entry
+			var entry logger.Entry
+			if err := json.Unmarshal(logData, &entry); err != nil {
+				return fmt.Errorf("failed to parse log entry: %w", err)
+			}
+
+			// Format and print log entry
+			fmt.Printf("[%s] [%s] %s: %s\n",
+				entry.Timestamp,
+				entry.Level,
+				entry.Component,
+				entry.Message)
+
+			return nil
+		})
+		done <- err
+	}()
+
+	// Wait for either completion or Ctrl+C
+	select {
+	case err := <-done:
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
+			os.Exit(1)
+		}
+	case <-sigChan:
+		fmt.Println("\nStopping log stream...")
+		return
 	}
 }

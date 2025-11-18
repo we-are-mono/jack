@@ -26,30 +26,30 @@ import (
 
 // MonitoringRPCProvider implements the Provider interface with CLI command support
 type MonitoringRPCProvider struct {
-	adapter *MonitoringAdapter
+	provider *MonitoringProvider
 }
 
 // NewMonitoringRPCProvider creates a new RPC provider for monitoring
 func NewMonitoringRPCProvider() *MonitoringRPCProvider {
-	adapter := NewMonitoringAdapter()
+	provider := NewMonitoringProvider()
 
 	return &MonitoringRPCProvider{
-		adapter: adapter,
+		provider: provider,
 	}
 }
 
 // Metadata returns plugin information including CLI commands
 func (p *MonitoringRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse, error) {
-	meta := p.adapter.Metadata()
-
 	return plugins.MetadataResponse{
-		Namespace:     meta.Namespace,
-		Version:       meta.Version,
-		Description:   meta.Description,
-		Category:      meta.Category,
-		ConfigPath:    meta.ConfigPath,
-		DefaultConfig: meta.DefaultConfig,
-		Dependencies:  meta.Dependencies,
+		Namespace:   "monitoring",
+		Version:     "1.0.0",
+		Description: "System and network metrics collection",
+		Category:    "monitoring",
+		ConfigPath:  "/etc/jack/monitoring.json",
+		DefaultConfig: map[string]interface{}{
+			"enabled":             true,
+			"collection_interval": 5,
+		},
 		CLICommands: []plugins.CLICommand{
 			{
 				Name:         "monitor",
@@ -65,34 +65,39 @@ func (p *MonitoringRPCProvider) Metadata(ctx context.Context) (plugins.MetadataR
 
 // ApplyConfig applies monitoring configuration
 func (p *MonitoringRPCProvider) ApplyConfig(ctx context.Context, configJSON []byte) error {
-	var config interface{}
+	var config MonitoringConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return err
 	}
-	return p.adapter.ApplyConfig(config)
+	return p.provider.ApplyConfig(&config)
 }
 
 // ValidateConfig validates monitoring configuration
 func (p *MonitoringRPCProvider) ValidateConfig(ctx context.Context, configJSON []byte) error {
-	var config interface{}
+	var config MonitoringConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return err
 	}
-	return p.adapter.ValidateConfig(config)
+	return p.provider.Validate(&config)
 }
 
 // Flush removes all configuration
 func (p *MonitoringRPCProvider) Flush(ctx context.Context) error {
-	return p.adapter.Flush()
+	return p.provider.Stop()
 }
 
 // Status returns current status as JSON
 func (p *MonitoringRPCProvider) Status(ctx context.Context) ([]byte, error) {
-	status, err := p.adapter.Status()
+	status, err := p.provider.Status()
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(status)
+}
+
+// OnLogEvent is not implemented for the monitoring plugin
+func (p *MonitoringRPCProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	return fmt.Errorf("plugin does not implement log event handling")
 }
 
 // ExecuteCLICommand executes CLI commands provided by this plugin
@@ -126,7 +131,7 @@ func (p *MonitoringRPCProvider) ExecuteCLICommand(ctx context.Context, command s
 // executeStats returns formatted system and interface statistics
 func (p *MonitoringRPCProvider) executeStats() ([]byte, error) {
 	// Get status from provider
-	statusData, err := p.adapter.Status()
+	statusData, err := p.provider.Status()
 	if err != nil {
 		return nil, err
 	}
@@ -190,20 +195,19 @@ func (p *MonitoringRPCProvider) executeBandwidth(args []string) ([]byte, error) 
 		targetInterface = args[0]
 	}
 
-	// Get provider to access history
-	provider := p.adapter.provider
-	if provider == nil {
+	// Access provider directly
+	if p.provider == nil {
 		return nil, fmt.Errorf("monitoring provider not initialized")
 	}
 
-	provider.mu.RLock()
-	defer provider.mu.RUnlock()
+	p.provider.mu.RLock()
+	defer p.provider.mu.RUnlock()
 
 	// Find the target interface in current metrics
 	var targetMetric *InterfaceMetrics
-	for i := range provider.interfaceMetrics {
-		if provider.interfaceMetrics[i].Name == targetInterface {
-			targetMetric = &provider.interfaceMetrics[i]
+	for i := range p.provider.interfaceMetrics {
+		if p.provider.interfaceMetrics[i].Name == targetInterface {
+			targetMetric = &p.provider.interfaceMetrics[i]
 			break
 		}
 	}
@@ -213,7 +217,7 @@ func (p *MonitoringRPCProvider) executeBandwidth(args []string) ([]byte, error) 
 	}
 
 	// Get bandwidth history
-	history, hasHistory := provider.bandwidthHistory[targetInterface]
+	history, hasHistory := p.provider.bandwidthHistory[targetInterface]
 
 	var buf bytes.Buffer
 

@@ -22,6 +22,8 @@ import (
 	"os"
 	"strings"
 
+	"github.com/we-are-mono/jack/daemon/logger"
+	"github.com/we-are-mono/jack/plugins"
 	"github.com/we-are-mono/jack/state"
 	"github.com/we-are-mono/jack/system"
 	"github.com/we-are-mono/jack/types"
@@ -104,13 +106,16 @@ func (s *Server) loadPlugins() error {
 	// Load each configured and enabled plugin
 	for name, pluginState := range jackConfig.Plugins {
 		if !pluginState.Enabled {
-			log.Printf("[INFO] Skipping disabled plugin: %s", name)
+			logger.Info("Skipping disabled plugin",
+				logger.Field{Key: "plugin", Value: name})
 			continue
 		}
 
 		plugin, err := LoadPlugin(name)
 		if err != nil {
-			log.Printf("[WARN] Failed to load plugin '%s': %v", name, err)
+			logger.Warn("Failed to load plugin",
+				logger.Field{Key: "plugin", Value: name},
+				logger.Field{Key: "error", Value: err.Error()})
 			continue
 		}
 
@@ -120,46 +125,110 @@ func (s *Server) loadPlugins() error {
 		jackConfig.Plugins[name] = pluginState
 
 		if err := s.registry.Register(plugin, name); err != nil {
-			log.Printf("[WARN] Failed to register plugin '%s': %v", name, err)
+			logger.Warn("Failed to register plugin",
+				logger.Field{Key: "plugin", Value: name},
+				logger.Field{Key: "error", Value: err.Error()})
 			plugin.Close()
 			continue
 		}
+
+		// Load and apply plugin config immediately to ensure plugins are ready
+		// before being registered with logger emitter
+		var config map[string]interface{}
+		namespace := metadata.Namespace
+		if err := state.LoadConfig(name, &config); err != nil {
+			// Config file doesn't exist - check if plugin provides defaults
+			if metadata.DefaultConfig != nil {
+				logger.Info("Using plugin default config",
+					logger.Field{Key: "plugin", Value: name})
+				config = metadata.DefaultConfig
+			} else {
+				logger.Info("No config file or defaults available",
+					logger.Field{Key: "plugin", Value: name})
+				config = make(map[string]interface{})
+			}
+		}
+		// Store in state
+		s.state.LoadCommitted(namespace, config)
+		if len(config) > 0 {
+			logger.Info("Loaded plugin configuration",
+				logger.Field{Key: "plugin", Value: name},
+				logger.Field{Key: "namespace", Value: namespace})
+			// Apply config immediately so plugin is initialized
+			if err := plugin.ApplyConfig(config); err != nil {
+				logger.Warn("Failed to apply plugin config",
+					logger.Field{Key: "plugin", Value: name},
+					logger.Field{Key: "error", Value: err.Error()})
+			}
+		}
+
+		// Register plugin with logger emitter if logger is initialized
+		s.registerPluginLogSubscriber(plugin, name)
 	}
 
 	// Save updated config with versions
 	if err := state.SaveJackConfig(jackConfig); err != nil {
-		log.Printf("[WARN] Failed to save updated plugin versions: %v", err)
+		logger.Warn("Failed to save updated plugin versions",
+			logger.Field{Key: "error", Value: err.Error()})
 	}
 
 	// Store jack config in state for access by observer
 	s.state.LoadCommittedJackConfig(jackConfig)
 
-	log.Printf("[REGISTRY] Loaded plugins: %v", s.registry.List())
+	logger.Info("Loaded plugins",
+		logger.Field{Key: "plugins", Value: s.registry.List()})
 	return nil
 }
 
+// registerPluginLogSubscriber registers a plugin with the logger emitter
+// so it can receive log events (e.g., sqlite3 database plugin)
+func (s *Server) registerPluginLogSubscriber(plugin plugins.Plugin, name string) {
+	// Get the logger emitter
+	emitter := logger.GetEmitter()
+	if emitter == nil {
+		return // Logger not initialized
+	}
+
+	// Get the underlying RPC provider
+	loader, ok := plugin.(*PluginLoader)
+	if !ok {
+		return // Not a PluginLoader
+	}
+
+	provider := loader.GetProvider()
+
+	// Create a subscriber that forwards log events to the plugin
+	subscriber := NewPluginLogSubscriber(provider, name)
+
+	// Register with the emitter
+	emitter.Subscribe(subscriber)
+
+	logger.Info("Registered plugin for log events",
+		logger.Field{Key: "plugin", Value: name})
+}
+
 func (s *Server) Start(applyOnStartup bool) error {
-	log.Println("Jack daemon starting...")
+	logger.Info("Jack daemon starting")
 
 	// Load plugins
 	if err := s.loadPlugins(); err != nil {
-		log.Printf("[WARN] Failed to load plugins: %v", err)
+		logger.Warn("Failed to load plugins", logger.Field{Key: "error", Value: err.Error()})
 	}
 
 	// Start network observer to detect external configuration changes
 	s.networkObserver = NewNetworkObserver(s)
 	go func() {
 		if err := s.networkObserver.Run(s.done); err != nil {
-			log.Printf("[ERROR] Network observer failed: %v", err)
+			logger.Error("Network observer failed", logger.Field{Key: "error", Value: err.Error()})
 		}
 	}()
 
 	// Load snapshots from disk
 	if err := s.state.LoadSnapshotsFromDisk(); err != nil {
-		log.Printf("[WARN] Failed to load snapshots: %v", err)
+		logger.Warn("Failed to load snapshots", logger.Field{Key: "error", Value: err.Error()})
 	} else {
 		snapshots := s.state.ListSnapshots()
-		log.Printf("[INFO] Loaded %d snapshot(s) from disk", len(snapshots))
+		logger.Info("Loaded snapshots from disk", logger.Field{Key: "count", Value: len(snapshots)})
 	}
 
 	// Load interfaces config (auto-generates default config on first boot)
@@ -168,12 +237,12 @@ func (s *Server) Start(applyOnStartup bool) error {
 		return fmt.Errorf("failed to load interfaces config: %w\n\nTip: Run 'jack validate' to check for configuration errors", err)
 	}
 	s.state.LoadCommittedInterfaces(interfacesConfig)
-	log.Printf("Loaded %d interfaces", len(interfacesConfig.Interfaces))
+	logger.Info("Loaded interfaces", logger.Field{Key: "count", Value: len(interfacesConfig.Interfaces)})
 
 	// Load routes config (required for core functionality)
 	var routesConfig types.RoutesConfig
 	if err := state.LoadConfig("routes", &routesConfig); err != nil {
-		log.Printf("[WARN] Failed to load routes config: %v", err)
+		logger.Warn("Failed to load routes config", logger.Field{Key: "error", Value: err.Error()})
 		// Initialize empty routes config so it can be modified via set command
 		routesConfig = types.RoutesConfig{
 			Routes: make(map[string]types.Route),
@@ -181,14 +250,15 @@ func (s *Server) Start(applyOnStartup bool) error {
 	}
 	// Always register routes config (even if empty)
 	s.state.LoadCommittedRoutes(&routesConfig)
-	log.Printf("Loaded %d routes", len(routesConfig.Routes))
+	logger.Info("Loaded routes", logger.Field{Key: "count", Value: len(routesConfig.Routes)})
 
 	// Load plugin configs generically for all registered plugins
 	for _, namespace := range s.registry.List() {
 		// Get plugin name for config file (use plugin name, not namespace)
 		pluginName, found := s.registry.GetPluginNameForNamespace(namespace)
 		if !found {
-			log.Printf("[WARN] No plugin name found for namespace '%s', skipping config load", namespace)
+			logger.Warn("No plugin name found for namespace, skipping config load",
+				logger.Field{Key: "namespace", Value: namespace})
 			continue
 		}
 
@@ -198,22 +268,27 @@ func (s *Server) Start(applyOnStartup bool) error {
 			if plugin, exists := s.registry.Get(namespace); exists {
 				metadata := plugin.Metadata()
 				if metadata.DefaultConfig != nil {
-					log.Printf("[INFO] No %s.json config found, using plugin defaults", pluginName)
+					logger.Info("Using plugin default config",
+						logger.Field{Key: "plugin", Value: pluginName})
 					config = metadata.DefaultConfig
 				} else {
-					log.Printf("[INFO] No %s.json config found and no defaults available", pluginName)
+					logger.Info("No config file or defaults available",
+						logger.Field{Key: "plugin", Value: pluginName})
 					// Still register empty config so 'set' command works
 					config = make(map[string]interface{})
 				}
 			} else {
-				log.Printf("[INFO] No %s.json config found", pluginName)
+				logger.Info("No config file found",
+					logger.Field{Key: "plugin", Value: pluginName})
 				config = make(map[string]interface{})
 			}
 		}
 		// Store in state using generic method (still use namespace as key internally)
 		s.state.LoadCommitted(namespace, config)
 		if len(config) > 0 {
-			log.Printf("Loaded %s.json config for %s plugin", pluginName, namespace)
+			logger.Info("Loaded plugin configuration",
+				logger.Field{Key: "plugin", Value: pluginName},
+				logger.Field{Key: "namespace", Value: namespace})
 		}
 	}
 
@@ -224,14 +299,16 @@ func (s *Server) Start(applyOnStartup bool) error {
 			s.networkObserver.MarkChange()
 		}
 
-		log.Println("Applying configuration on startup...")
+		logger.Info("Applying configuration on startup")
 
 		// Apply interfaces first
 		orderedNames := orderInterfaces(interfacesConfig.Interfaces)
 		for _, name := range orderedNames {
 			iface := interfacesConfig.Interfaces[name]
 			if err := system.ApplyInterfaceConfig(name, iface); err != nil {
-				log.Printf("[ERROR] Failed to configure %s: %v", name, err)
+				logger.Error("Failed to configure interface",
+					logger.Field{Key: "interface", Value: name},
+					logger.Field{Key: "error", Value: err.Error()})
 			}
 		}
 
@@ -243,19 +320,23 @@ func (s *Server) Start(applyOnStartup bool) error {
 					continue
 				}
 				if err := plugin.ApplyConfig(config); err != nil {
-					log.Printf("[WARN] Failed to apply %s config: %v", namespace, err)
+					logger.Warn("Failed to apply plugin config",
+						logger.Field{Key: "plugin", Value: namespace},
+						logger.Field{Key: "error", Value: err.Error()})
 				} else {
-					log.Printf("[%s] Plugin started with config", strings.ToUpper(namespace))
+					logger.Info("Plugin started with config",
+						logger.Field{Key: "plugin", Value: namespace})
 				}
 			}
 		}
 
 		// Apply routes AFTER plugins (so VPN interfaces exist)
 		if err := system.ApplyRoutesConfig(&routesConfig); err != nil {
-			log.Printf("[ERROR] Failed to apply routes: %v", err)
+			logger.Error("Failed to apply routes",
+				logger.Field{Key: "error", Value: err.Error()})
 		}
 
-		log.Println("Configuration applied")
+		logger.Info("Configuration applied on startup")
 	} else {
 		// If not applying on startup, still start plugins with their config
 		for _, namespace := range s.registry.List() {
@@ -265,15 +346,18 @@ func (s *Server) Start(applyOnStartup bool) error {
 					continue
 				}
 				if err := plugin.ApplyConfig(config); err != nil {
-					log.Printf("[WARN] Failed to apply %s config: %v", namespace, err)
+					logger.Warn("Failed to apply plugin config",
+						logger.Field{Key: "plugin", Value: namespace},
+						logger.Field{Key: "error", Value: err.Error()})
 				} else {
-					log.Printf("[%s] Plugin started with config", strings.ToUpper(namespace))
+					logger.Info("Plugin started with config",
+						logger.Field{Key: "plugin", Value: namespace})
 				}
 			}
 		}
 	}
 
-	log.Printf("Listening on %s", GetSocketPath())
+	logger.Info("Daemon listening", logger.Field{Key: "socket", Value: GetSocketPath()})
 
 	// Accept connections
 	for {
@@ -284,7 +368,8 @@ func (s *Server) Start(applyOnStartup bool) error {
 			case <-s.done:
 				return nil
 			default:
-				log.Printf("[ERROR] Failed to accept connection: %v", err)
+				logger.Error("Failed to accept connection",
+					logger.Field{Key: "error", Value: err.Error()})
 				continue
 			}
 		}
@@ -303,15 +388,10 @@ func (s *Server) Stop() error {
 }
 
 func (s *Server) handleConnection(conn net.Conn) {
-	defer conn.Close()
-
 	reader := bufio.NewReader(conn)
 	data, err := reader.ReadBytes('\n')
 	if err != nil {
-		s.sendResponse(conn, Response{
-			Success: false,
-			Error:   fmt.Sprintf("failed to read request: %v", err),
-		})
+		conn.Close()
 		return
 	}
 
@@ -321,9 +401,26 @@ func (s *Server) handleConnection(conn net.Conn) {
 			Success: false,
 			Error:   fmt.Sprintf("invalid request: %v", err),
 		})
+		conn.Close()
 		return
 	}
 
+	// Handle streaming log subscription specially (keeps connection open)
+	if req.Command == "logs-subscribe" {
+		defer conn.Close()
+
+		// Use empty filter if not provided
+		filter := req.LogFilter
+		if filter == nil {
+			filter = &LogFilter{}
+		}
+
+		s.handleLogsSubscribe(conn, filter)
+		return
+	}
+
+	// For all other commands, use normal request-response pattern
+	defer conn.Close()
 	resp := s.handleRequest(req)
 	s.sendResponse(conn, resp)
 }
@@ -485,7 +582,8 @@ func (s *Server) handleCommit() Response {
 				Error:   fmt.Sprintf("failed to save %s config: %v", filename, err),
 			}
 		}
-		log.Printf("[COMMIT] Saved %s.json config", filename)
+		logger.Info("Saved configuration file",
+			logger.Field{Key: "filename", Value: filename})
 	}
 
 	return Response{
@@ -509,7 +607,7 @@ func (s *Server) handleRevert() Response {
 }
 
 func (s *Server) handleApply() Response {
-	log.Printf("[INFO] Starting apply operation")
+	logger.Info("Starting apply operation")
 
 	// Capture snapshot before any changes
 	snapshot, err := system.CaptureSystemSnapshot()
@@ -523,10 +621,12 @@ func (s *Server) handleApply() Response {
 	// Store snapshot for potential rollback
 	checkpointID := snapshot.CheckpointID
 	if err := s.state.SaveSnapshot(checkpointID, snapshot); err != nil {
-		log.Printf("[WARN] Failed to save snapshot: %v", err)
+		logger.Warn("Failed to save snapshot",
+			logger.Field{Key: "error", Value: err.Error()})
 		// Continue anyway - don't block apply
 	} else {
-		log.Printf("[INFO] Created checkpoint: %s", checkpointID)
+		logger.Info("Created checkpoint",
+			logger.Field{Key: "checkpoint_id", Value: checkpointID})
 	}
 
 	// Execute apply with automatic rollback on error
@@ -571,9 +671,12 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 		iface := interfaces.Interfaces[name]
 		if err := system.ApplyInterfaceConfig(name, iface); err != nil {
 			// Rollback interfaces and IP forwarding
-			log.Printf("[ERROR] Interface %s failed: %v, rolling back", name, err)
+			logger.Error("Interface apply failed, rolling back",
+				logger.Field{Key: "interface", Value: name},
+				logger.Field{Key: "error", Value: err.Error()})
 			if rollbackErr := system.RestoreSnapshot(snapshot, appliedSteps); rollbackErr != nil {
-				log.Printf("[ERROR] Rollback failed: %v", rollbackErr)
+				logger.Error("Rollback failed",
+					logger.Field{Key: "error", Value: rollbackErr.Error()})
 			}
 			return fmt.Errorf("interface %s: %w", name, err)
 		}
@@ -587,7 +690,8 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 		// Get plugin name for config file
 		pluginName, found := s.registry.GetPluginNameForNamespace(namespace)
 		if !found {
-			log.Printf("[WARN] No plugin name found for namespace '%s', skipping", namespace)
+			logger.Warn("No plugin name found for namespace, skipping",
+				logger.Field{Key: "namespace", Value: namespace})
 			continue
 		}
 
@@ -597,7 +701,8 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 			// Use committed config from state
 			if cfgMap, ok := committedConfig.(map[string]interface{}); ok {
 				config = cfgMap
-				log.Printf("[APPLY] Using committed %s configuration from state", namespace)
+				logger.Info("Using committed configuration from state",
+					logger.Field{Key: "plugin", Value: namespace})
 			}
 		} else {
 			// No committed config - try to load from file
@@ -605,10 +710,14 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 				// No config file exists - try to use default config from plugin metadata
 				metadata := plugin.Metadata()
 				if metadata.DefaultConfig != nil {
-					log.Printf("[INFO] No %s.json config found, using plugin defaults for %s", pluginName, namespace)
+					logger.Info("Using plugin default config",
+						logger.Field{Key: "plugin", Value: pluginName},
+						logger.Field{Key: "namespace", Value: namespace})
 					config = metadata.DefaultConfig
 				} else {
-					log.Printf("[INFO] No %s.json config found and no defaults available, skipping %s", pluginName, namespace)
+					logger.Info("No config file or defaults available, skipping",
+						logger.Field{Key: "plugin", Value: pluginName},
+						logger.Field{Key: "namespace", Value: namespace})
 					continue
 				}
 			}
@@ -617,61 +726,75 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 		// Check if config has changed since last apply
 		lastApplied, err := s.state.GetLastApplied(namespace)
 		if err != nil {
-			log.Printf("[WARN] Failed to get last applied config for %s: %v", namespace, err)
+			logger.Warn("Failed to get last applied config",
+				logger.Field{Key: "plugin", Value: namespace},
+				logger.Field{Key: "error", Value: err.Error()})
 		} else if ConfigsEqual(config, lastApplied) {
-			log.Printf("[SKIP] %s configuration unchanged, skipping apply", namespace)
+			logger.Info("Configuration unchanged, skipping apply",
+				logger.Field{Key: "plugin", Value: namespace})
 			continue
 		}
 
 		// Apply config through the plugin
-		log.Printf("[APPLY] Applying %s configuration from %s.json", namespace, pluginName)
+		logger.Info("Applying plugin configuration",
+			logger.Field{Key: "plugin", Value: namespace},
+			logger.Field{Key: "config_file", Value: pluginName + ".json"})
 		if err := plugin.ApplyConfig(config); err != nil {
 			// Rollback everything including plugins
-			log.Printf("[ERROR] Plugin %s failed: %v, rolling back", namespace, err)
+			logger.Error("Plugin apply failed, rolling back",
+				logger.Field{Key: "plugin", Value: namespace},
+				logger.Field{Key: "error", Value: err.Error()})
 			s.rollbackPlugins(snapshot)
 			if rollbackErr := system.RestoreSnapshot(snapshot, appliedSteps); rollbackErr != nil {
-				log.Printf("[ERROR] Rollback failed: %v", rollbackErr)
+				logger.Error("Rollback failed",
+					logger.Field{Key: "error", Value: rollbackErr.Error()})
 			}
 			return fmt.Errorf("plugin %s: %w", namespace, err)
 		}
 
 		// Track this config as successfully applied
 		s.state.SetLastApplied(namespace, config)
-		log.Printf("[OK] Applied %s configuration", namespace)
+		logger.Info("Applied plugin configuration",
+			logger.Field{Key: "plugin", Value: namespace})
 	}
 	appliedSteps = append(appliedSteps, "plugins")
 
 	// Step 4: Apply static routes
 	var routesConfig types.RoutesConfig
 	if err := state.LoadConfig("routes", &routesConfig); err != nil {
-		log.Printf("[WARN] No routes config found: %v", err)
+		logger.Warn("No routes config found",
+			logger.Field{Key: "error", Value: err.Error()})
 	} else {
 		if err := system.ApplyRoutesConfig(&routesConfig); err != nil {
 			// Full rollback
-			log.Printf("[ERROR] Routes failed: %v, rolling back", err)
+			logger.Error("Routes apply failed, rolling back",
+				logger.Field{Key: "error", Value: err.Error()})
 			s.rollbackPlugins(snapshot)
 			if rollbackErr := system.RestoreSnapshot(snapshot, []string{"all"}); rollbackErr != nil {
-				log.Printf("[ERROR] Rollback failed: %v", rollbackErr)
+				logger.Error("Rollback failed",
+					logger.Field{Key: "error", Value: rollbackErr.Error()})
 			}
 			return fmt.Errorf("routes: %w", err)
 		}
 	}
 	appliedSteps = append(appliedSteps, "routes")
 
-	log.Printf("[INFO] Apply completed successfully")
+	logger.Info("Apply operation completed successfully")
 	return nil
 }
 
 // rollbackPlugins rolls back all plugins to their snapshot state.
 func (s *Server) rollbackPlugins(snapshot *system.SystemSnapshot) {
-	log.Printf("[INFO] Rolling back plugins")
+	logger.Info("Rolling back plugins")
 
 	for _, namespace := range s.registry.List() {
 		plugin, _ := s.registry.Get(namespace)
 
 		// Flush current state
 		if err := plugin.Flush(); err != nil {
-			log.Printf("[WARN] Failed to flush plugin %s: %v", namespace, err)
+			logger.Warn("Failed to flush plugin during rollback",
+				logger.Field{Key: "plugin", Value: namespace},
+				logger.Field{Key: "error", Value: err.Error()})
 		}
 
 		// Get plugin name
@@ -682,17 +805,23 @@ func (s *Server) rollbackPlugins(snapshot *system.SystemSnapshot) {
 
 		// Try to re-apply old config from LastApplied
 		if oldConfig, err := s.state.GetLastApplied(namespace); err == nil && oldConfig != nil {
-			log.Printf("[INFO] Restoring %s to last known good config", namespace)
+			logger.Info("Restoring plugin to last known good config",
+				logger.Field{Key: "plugin", Value: namespace})
 			if err := plugin.ApplyConfig(oldConfig); err != nil {
-				log.Printf("[WARN] Failed to restore plugin %s: %v", namespace, err)
+				logger.Warn("Failed to restore plugin",
+					logger.Field{Key: "plugin", Value: namespace},
+					logger.Field{Key: "error", Value: err.Error()})
 			}
 		} else {
 			// Try loading from file as fallback
 			var config map[string]interface{}
 			if err := state.LoadConfig(pluginName, &config); err == nil {
-				log.Printf("[INFO] Restoring %s from config file", namespace)
+				logger.Info("Restoring plugin from config file",
+					logger.Field{Key: "plugin", Value: namespace})
 				if err := plugin.ApplyConfig(config); err != nil {
-					log.Printf("[WARN] Failed to restore plugin %s: %v", namespace, err)
+					logger.Warn("Failed to restore plugin",
+						logger.Field{Key: "plugin", Value: namespace},
+						logger.Field{Key: "error", Value: err.Error()})
 				}
 			}
 		}
@@ -702,10 +831,18 @@ func (s *Server) rollbackPlugins(snapshot *system.SystemSnapshot) {
 func (s *Server) handleShow(path string) Response {
 	// If no path specified, return all configs
 	if path == "" {
-		allConfigs := map[string]interface{}{
-			"interfaces": s.state.GetCurrentInterfaces(),
-			"routes":     s.state.GetCurrentRoutes(),
+		allConfigs := map[string]interface{}{}
+
+		// Add interfaces - return just the map, not the whole struct
+		if interfaces := s.state.GetCurrentInterfaces(); interfaces != nil {
+			allConfigs["interfaces"] = interfaces.Interfaces
 		}
+
+		// Add routes - return just the map, not the whole struct
+		if routes := s.state.GetCurrentRoutes(); routes != nil {
+			allConfigs["routes"] = routes.Routes
+		}
+
 		// Add plugin configs dynamically
 		for _, namespace := range s.registry.List() {
 			if config, err := s.state.GetCurrent(namespace); err == nil {
@@ -764,23 +901,30 @@ func (s *Server) rewritePath(path string) string {
 }
 
 func (s *Server) handleGet(path string) Response {
-	// If no path provided, return list of available namespaces grouped by category
+	// If no path provided, return all current configs
 	if path == "" {
-		categories := make(map[string][]string)
+		allConfigs := make(map[string]interface{})
 
-		// Add core namespaces to "core" category
-		categories["core"] = []string{"interfaces", "routes"}
+		// Add interfaces - return just the map, not the whole struct
+		if interfaces := s.state.GetCurrentInterfaces(); interfaces != nil {
+			allConfigs["interfaces"] = interfaces.Interfaces
+		}
 
-		// Add plugin namespaces grouped by their categories
-		pluginCategories := s.registry.ListByCategory()
-		for category, namespaces := range pluginCategories {
-			categories[category] = namespaces
+		// Add routes - return just the map, not the whole struct
+		if routes := s.state.GetCurrentRoutes(); routes != nil {
+			allConfigs["routes"] = routes.Routes
+		}
+
+		// Add plugin configs dynamically
+		for _, namespace := range s.registry.List() {
+			if config, err := s.state.GetCurrent(namespace); err == nil {
+				allConfigs[namespace] = config
+			}
 		}
 
 		return Response{
 			Success: true,
-			Data:    categories,
-			Message: "Available configuration namespaces grouped by category",
+			Data:    allConfigs,
 		}
 	}
 
@@ -811,17 +955,6 @@ func (s *Server) handleGet(path string) Response {
 		return Response{
 			Success: false,
 			Error:   err.Error(),
-		}
-	}
-
-	// Convert routes map to slice for API compatibility when getting entire routes collection
-	if path == "routes" {
-		if routesMap, ok := value.(map[string]types.Route); ok {
-			routesSlice := make([]types.Route, 0, len(routesMap))
-			for _, route := range routesMap {
-				routesSlice = append(routesSlice, route)
-			}
-			value = routesSlice
 		}
 	}
 
@@ -947,8 +1080,8 @@ func (s *Server) handleValidate(path string, value interface{}) Response {
 		}
 
 	case "routes":
-		// Try to convert to routes structure (slice of Route)
-		var routesSlice []types.Route
+		// Try to convert to routes structure (map of Route)
+		var routesMap map[string]types.Route
 		jsonBytes, err := json.Marshal(value)
 		if err != nil {
 			return Response{
@@ -956,7 +1089,7 @@ func (s *Server) handleValidate(path string, value interface{}) Response {
 				Error:   fmt.Sprintf("failed to marshal routes: %v", err),
 			}
 		}
-		if err := json.Unmarshal(jsonBytes, &routesSlice); err != nil {
+		if err := json.Unmarshal(jsonBytes, &routesMap); err != nil {
 			return Response{
 				Success: false,
 				Error:   fmt.Sprintf("invalid routes structure: %v", err),
@@ -1074,13 +1207,15 @@ func orderInterfaces(interfaces map[string]types.Interface) []string {
 func (s *Server) sendResponse(conn net.Conn, resp Response) {
 	data, err := json.Marshal(resp)
 	if err != nil {
-		log.Printf("[ERROR] Failed to marshal response: %v", err)
+		logger.Error("Failed to marshal response",
+			logger.Field{Key: "error", Value: err.Error()})
 		return
 	}
 
 	data = append(data, '\n')
 	if _, err := conn.Write(data); err != nil {
-		log.Printf("[ERROR] Failed to write response: %v", err)
+		logger.Error("Failed to write response",
+			logger.Field{Key: "error", Value: err.Error()})
 	}
 }
 
@@ -1120,21 +1255,30 @@ func (s *Server) handlePluginEnable(pluginName string) Response {
 	var pluginConfig interface{}
 	if err := state.LoadConfig(pluginName, &pluginConfig); err == nil {
 		if err := plugin.ApplyConfig(pluginConfig); err != nil {
-			log.Printf("[WARN] Failed to apply config from %s.json for plugin '%s': %v", pluginName, pluginName, err)
+			logger.Warn("Failed to apply config from file",
+				logger.Field{Key: "plugin", Value: pluginName},
+				logger.Field{Key: "error", Value: err.Error()})
 		} else {
-			log.Printf("[INFO] Applied config from %s.json for plugin '%s'", pluginName, pluginName)
+			logger.Info("Applied config from file",
+				logger.Field{Key: "plugin", Value: pluginName},
+				logger.Field{Key: "config_file", Value: pluginName + ".json"})
 		}
 	} else {
 		// No config file exists - use default config from plugin metadata
 		if metadata.DefaultConfig != nil {
-			log.Printf("[INFO] No %s.json config file found for plugin '%s', using default config", pluginName, pluginName)
+			logger.Info("Using default config for plugin",
+				logger.Field{Key: "plugin", Value: pluginName})
 			if err := plugin.ApplyConfig(metadata.DefaultConfig); err != nil {
-				log.Printf("[WARN] Failed to apply default config for plugin '%s': %v", pluginName, err)
+				logger.Warn("Failed to apply default config",
+					logger.Field{Key: "plugin", Value: pluginName},
+					logger.Field{Key: "error", Value: err.Error()})
 			} else {
-				log.Printf("[INFO] Applied default config for plugin '%s'", pluginName)
+				logger.Info("Applied default config",
+					logger.Field{Key: "plugin", Value: pluginName})
 			}
 		} else {
-			log.Printf("[INFO] No %s.json config file found for plugin '%s' and no default config available", pluginName, pluginName)
+			logger.Info("No config file or defaults available",
+				logger.Field{Key: "plugin", Value: pluginName})
 		}
 	}
 
@@ -1318,7 +1462,8 @@ func (s *Server) handleRollback(checkpointID string) Response {
 		checkpointID = "latest"
 	}
 
-	log.Printf("[INFO] Rolling back to checkpoint: %s", checkpointID)
+	logger.Info("Rolling back to checkpoint",
+		logger.Field{Key: "checkpoint_id", Value: checkpointID})
 
 	// Load the snapshot
 	snapshot, err := s.state.LoadSnapshot(checkpointID)
@@ -1343,11 +1488,13 @@ func (s *Server) handleRollback(checkpointID string) Response {
 	// Restore nftables rules if present
 	if snapshot.NftablesRules != "" {
 		if err := system.RestoreNftablesRules(snapshot.NftablesRules); err != nil {
-			log.Printf("[WARN] Failed to restore nftables rules: %v", err)
+			logger.Warn("Failed to restore nftables rules",
+				logger.Field{Key: "error", Value: err.Error()})
 		}
 	}
 
-	log.Printf("[INFO] Successfully rolled back to checkpoint: %s", checkpointID)
+	logger.Info("Successfully rolled back to checkpoint",
+		logger.Field{Key: "checkpoint_id", Value: checkpointID})
 
 	return Response{
 		Success: true,
@@ -1367,7 +1514,7 @@ func (s *Server) handleCheckpointList() Response {
 
 // handleCheckpointCreate creates a manual checkpoint.
 func (s *Server) handleCheckpointCreate() Response {
-	log.Printf("[INFO] Creating manual checkpoint")
+	logger.Info("Creating manual checkpoint")
 
 	// Capture snapshot
 	snapshot, err := system.CaptureSystemSnapshot()
@@ -1389,11 +1536,51 @@ func (s *Server) handleCheckpointCreate() Response {
 		}
 	}
 
-	log.Printf("[INFO] Created checkpoint: %s", snapshot.CheckpointID)
+	logger.Info("Created checkpoint",
+		logger.Field{Key: "checkpoint_id", Value: snapshot.CheckpointID})
 
 	return Response{
 		Success: true,
 		Message: fmt.Sprintf("Created checkpoint: %s", snapshot.CheckpointID),
 		Data:    snapshot.CheckpointID,
+	}
+}
+
+// handleLogsSubscribe handles streaming log subscription
+// This is a special handler that keeps the connection open
+func (s *Server) handleLogsSubscribe(conn net.Conn, filter *LogFilter) {
+	// Don't defer conn.Close() - it's handled by caller when client disconnects
+
+	// Create socket subscriber with filter
+	subscriber := NewSocketLogSubscriber(conn, filter)
+
+	// Get the global logger emitter
+	emitter := logger.GetEmitter()
+	if emitter == nil {
+		logger.Error("Logger emitter not initialized")
+		return
+	}
+
+	// Subscribe to log events
+	emitter.Subscribe(subscriber)
+	defer func() {
+		emitter.Unsubscribe(subscriber)
+		subscriber.Close()
+	}()
+
+	logger.Info("Client subscribed to log stream",
+		logger.Field{Key: "level", Value: filter.Level},
+		logger.Field{Key: "component", Value: filter.Component})
+
+	// Keep connection open until client disconnects
+	// Just read until EOF (client closing)
+	buffer := make([]byte, 1)
+	for {
+		_, err := conn.Read(buffer)
+		if err != nil {
+			// Client disconnected
+			logger.Info("Client unsubscribed from log stream")
+			return
+		}
 	}
 }

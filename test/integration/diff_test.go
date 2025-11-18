@@ -275,11 +275,12 @@ func TestDiffComplexChanges(t *testing.T) {
 		},
 	}
 
-	initialRoutes := []types.Route{
-		{
+	initialRoutes := map[string]types.Route{
+		"route-0": {
 			Destination: "192.168.1.0/24",
 			Gateway:     "10.1.4.1",
 			Metric:      100,
+			Enabled:     true,
 		},
 	}
 
@@ -314,16 +315,18 @@ func TestDiffComplexChanges(t *testing.T) {
 		},
 	}
 
-	modifiedRoutes := []types.Route{
-		{ // Modified route
+	modifiedRoutes := map[string]types.Route{
+		"route-0": { // Modified route
 			Destination: "192.168.1.0/24",
 			Gateway:     "10.1.4.1",
 			Metric:      200, // Changed metric
+			Enabled:     true,
 		},
-		{ // Added route
+		"route-1": { // Added route
 			Destination: "192.168.2.0/24",
 			Gateway:     "10.1.4.1",
 			Metric:      100,
+			Enabled:     true,
 		},
 	}
 

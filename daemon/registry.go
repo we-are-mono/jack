@@ -14,9 +14,9 @@ package daemon
 
 import (
 	"fmt"
-	"log"
 	"sync"
 
+	"github.com/we-are-mono/jack/daemon/logger"
 	"github.com/we-are-mono/jack/plugins"
 )
 
@@ -55,8 +55,10 @@ func (r *PluginRegistry) Register(plugin plugins.Plugin, pluginName string) erro
 	if metadata.PathPrefix != "" {
 		r.pathPrefixes[metadata.Namespace] = metadata.PathPrefix
 	}
-	log.Printf("[REGISTRY] Registered plugin: %s (v%s) - %s",
-		metadata.Namespace, metadata.Version, metadata.Description)
+	logger.Info("Registered plugin in registry",
+		logger.Field{Key: "namespace", Value: metadata.Namespace},
+		logger.Field{Key: "version", Value: metadata.Version},
+		logger.Field{Key: "description", Value: metadata.Description})
 	return nil
 }
 
@@ -114,7 +116,8 @@ func (r *PluginRegistry) Unregister(namespace string) {
 		}
 	}
 
-	log.Printf("[REGISTRY] Unregistered plugin: %s", namespace)
+	logger.Info("Unregistered plugin from registry",
+		logger.Field{Key: "namespace", Value: namespace})
 }
 
 // GetPathPrefix returns the path prefix for a given namespace
@@ -176,7 +179,9 @@ func (r *PluginRegistry) CloseAll() {
 
 	for name, plugin := range r.plugins {
 		if err := plugin.Close(); err != nil {
-			log.Printf("[REGISTRY] Failed to close plugin '%s': %v", name, err)
+			logger.Warn("Failed to close plugin",
+				logger.Field{Key: "plugin", Value: name},
+				logger.Field{Key: "error", Value: err.Error()})
 		}
 	}
 }

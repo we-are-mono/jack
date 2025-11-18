@@ -199,11 +199,12 @@ func TestApplyMultipleConfigTypes(t *testing.T) {
 	require.NoError(t, err)
 
 	// Set routes
-	routes := []types.Route{
-		{
+	routes := map[string]types.Route{
+		"test-route-idempotency": {
 			Destination: "192.168.100.0/24",
 			Gateway:     "10.100.3.1",
 			Metric:      100,
+			Enabled:     true,
 		},
 	}
 

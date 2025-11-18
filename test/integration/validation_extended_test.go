@@ -64,6 +64,8 @@ func TestValidateRoutesDirectly(t *testing.T) {
 	harness := NewTestHarness(t)
 	defer harness.Cleanup()
 
+	eth0 := harness.CreateDummyInterface("eth0")
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -72,12 +74,39 @@ func TestValidateRoutesDirectly(t *testing.T) {
 	}()
 	harness.WaitForDaemon(5 * time.Second)
 
+	// Set up an interface in the same network as the route gateway
+	interfaces := map[string]types.Interface{
+		eth0: {
+			Type:     "physical",
+			Device:   eth0,
+			Enabled:  true,
+			Protocol: "static",
+			IPAddr:   "10.0.0.2",
+			Netmask:  "255.255.255.0",
+			MTU:      1500,
+		},
+	}
+
+	_, err := harness.SendRequest(daemon.Request{
+		Command: "set",
+		Path:    "interfaces",
+		Value:   interfaces,
+	})
+	require.NoError(t, err)
+
+	_, err = harness.SendRequest(daemon.Request{Command: "commit"})
+	require.NoError(t, err)
+
+	_, err = harness.SendRequest(daemon.Request{Command: "apply"})
+	require.NoError(t, err)
+
 	// Valid routes
-	validRoutes := []types.Route{
-		{
+	validRoutes := map[string]types.Route{
+		"test-route-extended": {
 			Destination: "192.168.7.0/24",
 			Gateway:     "10.0.0.1",
 			Metric:      100,
+			Enabled:     true,
 		},
 	}
 
@@ -87,6 +116,9 @@ func TestValidateRoutesDirectly(t *testing.T) {
 		Value:   validRoutes,
 	})
 	require.NoError(t, err)
+	if !resp.Success {
+		t.Logf("Validation failed: %s", resp.Error)
+	}
 	assert.True(t, resp.Success, "valid routes should pass validation")
 
 	// Invalid routes structure (wrong type)

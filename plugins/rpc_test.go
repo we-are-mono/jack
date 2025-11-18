@@ -76,6 +76,11 @@ func (m *mockProvider) ExecuteCLICommand(ctx context.Context, command string, ar
 	return []byte("command output"), nil
 }
 
+func (m *mockProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	// Mock implementation - just return nil
+	return nil
+}
+
 func TestMetadataResponse_Structure(t *testing.T) {
 	metadata := MetadataResponse{
 		Namespace:    "test",

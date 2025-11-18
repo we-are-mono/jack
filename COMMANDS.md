@@ -179,6 +179,11 @@ jack daemon
 ### logs
 ```
 jack logs
+jack logs watch
+jack logs watch <level>
+jack logs watch info
+jack logs watch error
+jack logs watch --component <component>
 ```
 
 ## Plugin-Provided Commands
@@ -197,6 +202,13 @@ jack monitor bandwidth <interface>
 jack monitor bandwidth br-lan
 jack monitor bandwidth wg-proton
 jack monitor bandwidth eth0
+```
+
+### sqlite3 (sqlite3 plugin)
+```
+jack sqlite3 stats
+jack sqlite3 logs
+jack sqlite3 vacuum
 ```
 
 ## Global Options
@@ -220,6 +232,7 @@ jack -h
   - `vpn` (wireguard plugin)
   - `monitoring` (monitoring plugin)
   - `led` (leds plugin)
+  - `sqlite3` (sqlite3 plugin)
 - **LED names contain colons**: Linux LED names like `status:green` include the colon as part of the name itself (from `/sys/class/leds/status:green`)
 - Values can be strings, numbers, booleans, or JSON arrays/objects (use quotes for strings with spaces)
 - Continuous commands (`monitor stats`, `monitor bandwidth`) refresh automatically until Ctrl+C

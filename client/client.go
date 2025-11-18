@@ -60,3 +60,44 @@ func Send(req daemon.Request) (*daemon.Response, error) {
 
 	return &resp, nil
 }
+
+// StreamLogs streams logs from the daemon and calls the callback for each entry
+// The connection stays open until an error occurs or the context is canceled
+func StreamLogs(filter *daemon.LogFilter, callback func([]byte) error) error {
+	conn, err := net.Dial("unix", GetSocketPath())
+	if err != nil {
+		return fmt.Errorf("failed to connect to daemon (is it running?): %w", err)
+	}
+	defer conn.Close()
+
+	// Send logs-subscribe request
+	req := daemon.Request{
+		Command:   "logs-subscribe",
+		LogFilter: filter,
+	}
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	data = append(data, '\n')
+	if _, err = conn.Write(data); err != nil {
+		return fmt.Errorf("failed to send request: %w", err)
+	}
+
+	// Read log entries continuously until connection closes
+	reader := bufio.NewReader(conn)
+	for {
+		logData, err := reader.ReadBytes('\n')
+		if err != nil {
+			// Connection closed or error occurred
+			return err
+		}
+
+		// Call callback with log entry JSON
+		if err := callback(logData); err != nil {
+			return err
+		}
+	}
+}

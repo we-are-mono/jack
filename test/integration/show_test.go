@@ -54,11 +54,12 @@ func TestShowAllConfiguration(t *testing.T) {
 		},
 	}
 
-	routes := []types.Route{
-		{
+	routes := map[string]types.Route{
+		"test-route-show": {
 			Destination: "192.168.5.0/24",
 			Gateway:     "10.5.1.1",
 			Metric:      100,
+			Enabled:     true,
 		},
 	}
 

@@ -15,11 +15,11 @@ package state
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net"
 	"os"
 
 	"github.com/vishvananda/netlink"
+	"github.com/we-are-mono/jack/daemon/logger"
 	"github.com/we-are-mono/jack/types"
 )
 
@@ -32,7 +32,7 @@ func LoadInterfacesConfig() (*types.InterfacesConfig, error) {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			// First boot - generate default config
-			log.Println("[INFO] No interfaces config found, auto-detecting network interfaces...")
+			logger.Info("No interfaces config found, auto-detecting network interfaces")
 			defaultConfig, genErr := generateDefaultInterfacesConfig()
 			if genErr != nil {
 				return nil, fmt.Errorf("failed to generate default interfaces config: %w", genErr)
@@ -40,9 +40,11 @@ func LoadInterfacesConfig() (*types.InterfacesConfig, error) {
 
 			// Save the generated config to disk
 			if saveErr := SaveConfig("interfaces", defaultConfig); saveErr != nil {
-				log.Printf("[WARN] Failed to save auto-generated interfaces config: %v", saveErr)
+				logger.Warn("Failed to save auto-generated interfaces config",
+					logger.Field{Key: "error", Value: saveErr.Error()})
 			} else {
-				log.Printf("[INFO] Saved auto-generated interfaces configuration to %s/interfaces.json", GetConfigDir())
+				logger.Info("Saved auto-generated interfaces configuration",
+					logger.Field{Key: "path", Value: GetConfigDir() + "/interfaces.json"})
 			}
 
 			return defaultConfig, nil
@@ -81,7 +83,8 @@ func generateDefaultInterfacesConfig() (*types.InterfacesConfig, error) {
 	// Add WAN interface
 	if wanIface != nil {
 		wanName := wanIface.Attrs().Name
-		log.Printf("[INFO] Detected WAN interface: %s", wanName)
+		logger.Info("Detected WAN interface",
+			logger.Field{Key: "interface", Value: wanName})
 
 		// Try to preserve existing IP configuration
 		wanInterface := types.Interface{
@@ -102,10 +105,12 @@ func generateDefaultInterfacesConfig() (*types.InterfacesConfig, error) {
 				wanInterface.Protocol = "static"
 				wanInterface.IPAddr = ip.String()
 				wanInterface.Netmask = net.IP(ipNet.Mask).String()
-				log.Printf("[INFO] Preserving existing WAN IP: %s/%s", ip.String(), net.IP(ipNet.Mask).String())
+				logger.Info("Preserving existing WAN IP",
+					logger.Field{Key: "ip", Value: ip.String()},
+					logger.Field{Key: "netmask", Value: net.IP(ipNet.Mask).String()})
 			}
 		} else {
-			log.Printf("[INFO] No existing IP on WAN, defaulting to DHCP")
+			logger.Info("No existing IP on WAN, defaulting to DHCP")
 		}
 
 		// Get existing default gateway
@@ -116,12 +121,14 @@ func generateDefaultInterfacesConfig() (*types.InterfacesConfig, error) {
 				isDefaultRoute := route.Dst == nil || (route.Dst != nil && route.Dst.String() == "0.0.0.0/0")
 				if isDefaultRoute && route.Gw != nil && route.LinkIndex == wanIface.Attrs().Index {
 					wanInterface.Gateway = route.Gw.String()
-					log.Printf("[INFO] Preserving existing WAN gateway: %s", route.Gw.String())
+					logger.Info("Preserving existing WAN gateway",
+						logger.Field{Key: "gateway", Value: route.Gw.String()})
 					break
 				}
 			}
 		} else {
-			log.Printf("[WARN] Failed to list routes: %v", err)
+			logger.Warn("Failed to list routes",
+				logger.Field{Key: "error", Value: err.Error()})
 		}
 
 		config.Interfaces["wan"] = wanInterface
@@ -132,7 +139,8 @@ func generateDefaultInterfacesConfig() (*types.InterfacesConfig, error) {
 		bridgePorts := make([]string, len(lanIfaces))
 		for i, iface := range lanIfaces {
 			bridgePorts[i] = iface.Attrs().Name
-			log.Printf("[INFO] Adding %s to LAN bridge", iface.Attrs().Name)
+			logger.Info("Adding interface to LAN bridge",
+				logger.Field{Key: "interface", Value: iface.Attrs().Name})
 		}
 
 		config.Interfaces["lan"] = types.Interface{
@@ -146,7 +154,9 @@ func generateDefaultInterfacesConfig() (*types.InterfacesConfig, error) {
 			Enabled:     true,
 		}
 
-		log.Printf("[INFO] Created LAN bridge 'br-lan' with %d interfaces", len(bridgePorts))
+		logger.Info("Created LAN bridge",
+			logger.Field{Key: "bridge", Value: "br-lan"},
+			logger.Field{Key: "port_count", Value: len(bridgePorts)})
 	}
 
 	if len(config.Interfaces) == 0 {
@@ -169,7 +179,8 @@ func detectWANInterface() (netlink.Link, error) {
 			if route.Dst == nil && route.LinkIndex > 0 {
 				link, linkErr := netlink.LinkByIndex(route.LinkIndex)
 				if linkErr == nil && !isLoopback(link) {
-					log.Printf("[INFO] Found WAN interface via default route: %s", link.Attrs().Name)
+					logger.Info("Found WAN interface via default route",
+						logger.Field{Key: "interface", Value: link.Attrs().Name})
 					return link, nil
 				}
 			}
@@ -200,7 +211,8 @@ func detectWANInterface() (netlink.Link, error) {
 		if attrs.Flags&net.FlagUp != 0 {
 			addrs, err := netlink.AddrList(link, netlink.FAMILY_V4)
 			if err == nil && len(addrs) > 0 {
-				log.Printf("[INFO] Found WAN interface (UP with IP): %s", attrs.Name)
+				logger.Info("Found WAN interface (UP with IP)",
+					logger.Field{Key: "interface", Value: attrs.Name})
 				return link, nil
 			}
 		}
@@ -208,7 +220,8 @@ func detectWANInterface() (netlink.Link, error) {
 
 	// Strategy 3: Use first physical interface as fallback
 	if firstPhysical != nil {
-		log.Printf("[INFO] Using first physical interface as WAN: %s", firstPhysical.Attrs().Name)
+		logger.Info("Using first physical interface as WAN",
+			logger.Field{Key: "interface", Value: firstPhysical.Attrs().Name})
 		return firstPhysical, nil
 	}
 

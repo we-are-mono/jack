@@ -13,12 +13,12 @@ package system
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"os"
 	"os/exec"
 
 	"github.com/vishvananda/netlink"
+	"github.com/we-are-mono/jack/daemon/logger"
 )
 
 // RestoreSnapshot restores the system to the state captured in the snapshot.
@@ -31,10 +31,11 @@ func RestoreSnapshot(snapshot *SystemSnapshot, scope []string) error {
 
 	if containsScope(scope, "routes") || containsScope(scope, "all") {
 		if err := rollbackRoutes(snapshot.Routes); err != nil {
-			log.Printf("[ERROR] Failed to rollback routes: %v", err)
+			logger.Error("Failed to rollback routes",
+				logger.Field{Key: "error", Value: err.Error()})
 			errors = append(errors, fmt.Errorf("routes: %w", err))
 		} else {
-			log.Printf("[INFO] Successfully rolled back routes")
+			logger.Info("Successfully rolled back routes")
 		}
 	}
 
@@ -43,19 +44,21 @@ func RestoreSnapshot(snapshot *SystemSnapshot, scope []string) error {
 
 	if containsScope(scope, "interfaces") || containsScope(scope, "all") {
 		if err := rollbackInterfaces(snapshot.Interfaces); err != nil {
-			log.Printf("[ERROR] Failed to rollback interfaces: %v", err)
+			logger.Error("Failed to rollback interfaces",
+				logger.Field{Key: "error", Value: err.Error()})
 			errors = append(errors, fmt.Errorf("interfaces: %w", err))
 		} else {
-			log.Printf("[INFO] Successfully rolled back interfaces")
+			logger.Info("Successfully rolled back interfaces")
 		}
 	}
 
 	if containsScope(scope, "ipforward") || containsScope(scope, "all") {
 		if err := rollbackIPForwarding(snapshot.IPForwarding); err != nil {
-			log.Printf("[ERROR] Failed to rollback IP forwarding: %v", err)
+			logger.Error("Failed to rollback IP forwarding",
+				logger.Field{Key: "error", Value: err.Error()})
 			errors = append(errors, fmt.Errorf("ipforward: %w", err))
 		} else {
-			log.Printf("[INFO] Successfully rolled back IP forwarding")
+			logger.Info("Successfully rolled back IP forwarding")
 		}
 	}
 
@@ -102,9 +105,12 @@ func rollbackInterfaces(snapshots map[string]InterfaceSnapshot) error {
 		snapshot, existedInSnapshot := snapshots[name]
 		if !existedInSnapshot || !snapshot.Existed {
 			// Interface didn't exist in snapshot, remove it
-			log.Printf("[INFO] Removing interface %s (created during apply)", name)
+			logger.Info("Removing interface (created during apply)",
+				logger.Field{Key: "interface", Value: name})
 			if err := netlink.LinkDel(link); err != nil {
-				log.Printf("[WARN] Failed to remove interface %s: %v", name, err)
+				logger.Warn("Failed to remove interface",
+					logger.Field{Key: "interface", Value: name},
+					logger.Field{Key: "error", Value: err.Error()})
 			}
 		}
 	}
@@ -116,7 +122,9 @@ func rollbackInterfaces(snapshots map[string]InterfaceSnapshot) error {
 		}
 
 		if err := restoreInterfaceState(snapshot, currentNames); err != nil {
-			log.Printf("[WARN] Failed to restore interface %s: %v", name, err)
+			logger.Warn("Failed to restore interface",
+				logger.Field{Key: "interface", Value: name},
+				logger.Field{Key: "error", Value: err.Error()})
 			// Continue with other interfaces
 		}
 	}
@@ -129,13 +137,17 @@ func restoreInterfaceState(snapshot InterfaceSnapshot, currentLinks map[string]n
 	link, exists := currentLinks[snapshot.Name]
 	if !exists {
 		// Interface was deleted during apply
-		log.Printf("[INFO] Interface %s was deleted, attempting to recreate", snapshot.Name)
+		logger.Info("Interface was deleted, attempting to recreate",
+			logger.Field{Key: "interface", Value: snapshot.Name})
 		return recreateInterface(snapshot)
 	}
 
 	// Restore MTU
 	if link.Attrs().MTU != snapshot.MTU {
-		log.Printf("[INFO] Restoring MTU for %s: %d -> %d", snapshot.Name, link.Attrs().MTU, snapshot.MTU)
+		logger.Info("Restoring MTU",
+			logger.Field{Key: "interface", Value: snapshot.Name},
+			logger.Field{Key: "current_mtu", Value: link.Attrs().MTU},
+			logger.Field{Key: "target_mtu", Value: snapshot.MTU})
 		if err := netlink.LinkSetMTU(link, snapshot.MTU); err != nil {
 			return fmt.Errorf("failed to set MTU: %w", err)
 		}
@@ -146,7 +158,9 @@ func restoreInterfaceState(snapshot InterfaceSnapshot, currentLinks map[string]n
 	snapshotUp := snapshot.State == "up"
 
 	if currentUp != snapshotUp {
-		log.Printf("[INFO] Restoring state for %s: %s", snapshot.Name, snapshot.State)
+		logger.Info("Restoring interface state",
+			logger.Field{Key: "interface", Value: snapshot.Name},
+			logger.Field{Key: "state", Value: snapshot.State})
 		if snapshotUp {
 			if err := netlink.LinkSetUp(link); err != nil {
 				return fmt.Errorf("failed to set link up: %w", err)
@@ -185,9 +199,13 @@ func restoreIPAddresses(link netlink.Link, snapshotAddrs []string) error {
 	for _, current := range currentAddrs {
 		addrStr := current.IPNet.String()
 		if !containsString(snapshotAddrs, addrStr) {
-			log.Printf("[INFO] Removing address %s from %s", addrStr, link.Attrs().Name)
+			logger.Info("Removing address",
+				logger.Field{Key: "address", Value: addrStr},
+				logger.Field{Key: "interface", Value: link.Attrs().Name})
 			if err := netlink.AddrDel(link, &current); err != nil {
-				log.Printf("[WARN] Failed to remove address %s: %v", addrStr, err)
+				logger.Warn("Failed to remove address",
+					logger.Field{Key: "address", Value: addrStr},
+					logger.Field{Key: "error", Value: err.Error()})
 			}
 		}
 	}
@@ -204,15 +222,21 @@ func restoreIPAddresses(link netlink.Link, snapshotAddrs []string) error {
 		}
 
 		if !found {
-			log.Printf("[INFO] Adding address %s to %s", addrStr, link.Attrs().Name)
+			logger.Info("Adding address",
+				logger.Field{Key: "address", Value: addrStr},
+				logger.Field{Key: "interface", Value: link.Attrs().Name})
 			addr, err := netlink.ParseAddr(addrStr)
 			if err != nil {
-				log.Printf("[WARN] Failed to parse address %s: %v", addrStr, err)
+				logger.Warn("Failed to parse address",
+					logger.Field{Key: "address", Value: addrStr},
+					logger.Field{Key: "error", Value: err.Error()})
 				continue
 			}
 
 			if err := netlink.AddrAdd(link, addr); err != nil {
-				log.Printf("[WARN] Failed to add address %s: %v", addrStr, err)
+				logger.Warn("Failed to add address",
+					logger.Field{Key: "address", Value: addrStr},
+					logger.Field{Key: "error", Value: err.Error()})
 			}
 		}
 	}
@@ -231,10 +255,14 @@ func restoreBridgePorts(bridge netlink.Link, snapshotPorts []string) error {
 	// Remove ports not in snapshot
 	for _, port := range currentPorts {
 		if !containsString(snapshotPorts, port) {
-			log.Printf("[INFO] Removing port %s from bridge %s", port, bridge.Attrs().Name)
+			logger.Info("Removing port from bridge",
+				logger.Field{Key: "port", Value: port},
+				logger.Field{Key: "bridge", Value: bridge.Attrs().Name})
 			if portLink, err := netlink.LinkByName(port); err == nil {
 				if err := netlink.LinkSetNoMaster(portLink); err != nil {
-					log.Printf("[WARN] Failed to remove port %s: %v", port, err)
+					logger.Warn("Failed to remove port",
+						logger.Field{Key: "port", Value: port},
+						logger.Field{Key: "error", Value: err.Error()})
 				}
 			}
 		}
@@ -243,10 +271,14 @@ func restoreBridgePorts(bridge netlink.Link, snapshotPorts []string) error {
 	// Add ports from snapshot
 	for _, port := range snapshotPorts {
 		if !containsString(currentPorts, port) {
-			log.Printf("[INFO] Adding port %s to bridge %s", port, bridge.Attrs().Name)
+			logger.Info("Adding port to bridge",
+				logger.Field{Key: "port", Value: port},
+				logger.Field{Key: "bridge", Value: bridge.Attrs().Name})
 			if portLink, err := netlink.LinkByName(port); err == nil {
 				if err := netlink.LinkSetMaster(portLink, bridge); err != nil {
-					log.Printf("[WARN] Failed to add port %s: %v", port, err)
+					logger.Warn("Failed to add port",
+						logger.Field{Key: "port", Value: port},
+						logger.Field{Key: "error", Value: err.Error()})
 				}
 			}
 		}
@@ -259,8 +291,11 @@ func restoreBridgePorts(bridge netlink.Link, snapshotPorts []string) error {
 func recreateInterface(snapshot InterfaceSnapshot) error {
 	// This is complex and depends on interface type
 	// For now, we log a warning and skip recreation
-	log.Printf("[WARN] Cannot recreate deleted interface %s (type: %s)", snapshot.Name, snapshot.Type)
-	log.Printf("[WARN] Manual intervention may be required to restore %s", snapshot.Name)
+	logger.Warn("Cannot recreate deleted interface",
+		logger.Field{Key: "interface", Value: snapshot.Name},
+		logger.Field{Key: "type", Value: snapshot.Type})
+	logger.Warn("Manual intervention may be required to restore interface",
+		logger.Field{Key: "interface", Value: snapshot.Name})
 	return nil
 }
 
@@ -283,9 +318,12 @@ func rollbackRoutes(snapshotRoutes []RouteSnapshot) error {
 		}
 
 		if !snapshotRouteExists(current, snapshotRoutes) {
-			log.Printf("[INFO] Removing route: dst=%v gw=%v", current.Dst, current.Gw)
+			logger.Info("Removing route",
+				logger.Field{Key: "destination", Value: current.Dst},
+				logger.Field{Key: "gateway", Value: current.Gw})
 			if err := netlink.RouteDel(&current); err != nil {
-				log.Printf("[WARN] Failed to remove route: %v", err)
+				logger.Warn("Failed to remove route",
+					logger.Field{Key: "error", Value: err.Error()})
 			}
 		}
 	}
@@ -293,7 +331,9 @@ func rollbackRoutes(snapshotRoutes []RouteSnapshot) error {
 	// Add routes from snapshot
 	for _, snapshot := range snapshotRoutes {
 		if !snapshotRouteInCurrent(snapshot, currentRoutes) {
-			log.Printf("[INFO] Adding route: dst=%s gw=%s", snapshot.Destination, snapshot.Gateway)
+			logger.Info("Adding route",
+				logger.Field{Key: "destination", Value: snapshot.Destination},
+				logger.Field{Key: "gateway", Value: snapshot.Gateway})
 
 			route := &netlink.Route{
 				Priority: snapshot.Metric,
@@ -305,7 +345,9 @@ func rollbackRoutes(snapshotRoutes []RouteSnapshot) error {
 			if snapshot.Destination != "default" {
 				_, dst, err := net.ParseCIDR(snapshot.Destination)
 				if err != nil {
-					log.Printf("[WARN] Failed to parse destination %s: %v", snapshot.Destination, err)
+					logger.Warn("Failed to parse destination",
+						logger.Field{Key: "destination", Value: snapshot.Destination},
+						logger.Field{Key: "error", Value: err.Error()})
 					continue
 				}
 				route.Dst = dst
@@ -324,7 +366,8 @@ func rollbackRoutes(snapshotRoutes []RouteSnapshot) error {
 			}
 
 			if err := netlink.RouteAdd(route); err != nil {
-				log.Printf("[WARN] Failed to add route: %v", err)
+				logger.Warn("Failed to add route",
+					logger.Field{Key: "error", Value: err.Error()})
 			}
 		}
 	}
@@ -439,6 +482,6 @@ func RestoreNftablesRules(rulesJSON string) error {
 		return fmt.Errorf("failed to restore nftables rules: %w (output: %s)", err, string(output))
 	}
 
-	log.Printf("[INFO] Successfully restored nftables rules")
+	logger.Info("Successfully restored nftables rules")
 	return nil
 }

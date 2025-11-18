@@ -25,6 +25,11 @@ var ErrInvalidConfig = errors.New("invalid configuration type")
 
 // Plugin is the unified interface that all Jack plugins must implement.
 // Plugins are self-describing and tell the core what they can do.
+//
+// DEPRECATED: This interface is deprecated. Plugins should implement the Provider
+// interface directly instead of using the Plugin interface with PluginAdapter.
+// The Plugin interface lacks support for CLI commands, log events, and context-based
+// cancellation. All core plugins have been migrated to the modern Provider pattern.
 type Plugin interface {
 	// Metadata returns information about what this plugin provides
 	Metadata() PluginMetadata

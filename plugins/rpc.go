@@ -14,7 +14,6 @@ package plugins
 
 import (
 	"context"
-	"encoding/json"
 	"net/rpc"
 
 	"github.com/hashicorp/go-plugin"
@@ -47,6 +46,10 @@ type Provider interface {
 
 	// ExecuteCLICommand executes a CLI command provided by the plugin
 	ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error)
+
+	// OnLogEvent receives a log event from the daemon (optional, returns error if not implemented)
+	// logEventJSON is the JSON-encoded log entry
+	OnLogEvent(ctx context.Context, logEventJSON []byte) error
 }
 
 // CLICommand describes a CLI command provided by a plugin
@@ -191,6 +194,21 @@ func (s *RPCServer) ExecuteCLICommand(args *ExecuteCLICommandArgs, reply *Execut
 	return nil
 }
 
+type OnLogEventArgs struct {
+	LogEventJSON []byte
+}
+type OnLogEventReply struct {
+	Error string
+}
+
+func (s *RPCServer) OnLogEvent(args *OnLogEventArgs, reply *OnLogEventReply) error {
+	err := s.Impl.OnLogEvent(context.Background(), args.LogEventJSON)
+	if err != nil {
+		reply.Error = err.Error()
+	}
+	return nil
+}
+
 // ============================================================================
 // RPC Client Implementation
 // ============================================================================
@@ -275,6 +293,20 @@ func (c *RPCClient) ExecuteCLICommand(ctx context.Context, command string, args 
 	return reply.Output, nil
 }
 
+func (c *RPCClient) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	var reply OnLogEventReply
+	err := c.client.Call("Plugin.OnLogEvent", &OnLogEventArgs{
+		LogEventJSON: logEventJSON,
+	}, &reply)
+	if err != nil {
+		return err
+	}
+	if reply.Error != "" {
+		return ErrFromString(reply.Error)
+	}
+	return nil
+}
+
 // ErrFromString creates an error from a string
 func ErrFromString(s string) error {
 	if s == "" {
@@ -299,66 +331,4 @@ func ServePlugin(impl Provider) {
 			"generic": &RPCPlugin{Impl: impl},
 		},
 	})
-}
-
-// ============================================================================
-// Plugin Adapter - wraps Plugin interface as Provider
-// ============================================================================
-
-// PluginAdapter adapts the Plugin interface to Provider for RPC
-type PluginAdapter struct {
-	impl Plugin
-}
-
-// NewPluginAdapter creates an adapter
-func NewPluginAdapter(impl Plugin) Provider {
-	return &PluginAdapter{impl: impl}
-}
-
-func (a *PluginAdapter) Metadata(ctx context.Context) (MetadataResponse, error) {
-	meta := a.impl.Metadata()
-	return MetadataResponse{
-		Namespace:     meta.Namespace,
-		Version:       meta.Version,
-		Description:   meta.Description,
-		Category:      meta.Category,
-		ConfigPath:    meta.ConfigPath,
-		DefaultConfig: meta.DefaultConfig,
-		Dependencies:  meta.Dependencies,
-		PathPrefix:    meta.PathPrefix,
-	}, nil
-}
-
-func (a *PluginAdapter) ApplyConfig(ctx context.Context, configJSON []byte) error {
-	// The plugin will handle JSON unmarshaling internally
-	var config interface{}
-	if err := json.Unmarshal(configJSON, &config); err != nil {
-		return err
-	}
-	return a.impl.ApplyConfig(config)
-}
-
-func (a *PluginAdapter) ValidateConfig(ctx context.Context, configJSON []byte) error {
-	var config interface{}
-	if err := json.Unmarshal(configJSON, &config); err != nil {
-		return err
-	}
-	return a.impl.ValidateConfig(config)
-}
-
-func (a *PluginAdapter) Flush(ctx context.Context) error {
-	return a.impl.Flush()
-}
-
-func (a *PluginAdapter) Status(ctx context.Context) ([]byte, error) {
-	status, err := a.impl.Status()
-	if err != nil {
-		return nil, err
-	}
-	return json.Marshal(status)
-}
-
-func (a *PluginAdapter) ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error) {
-	// Default implementation returns error - plugins that provide CLI commands will override this
-	return nil, ErrFromString("plugin does not implement CLI commands")
 }

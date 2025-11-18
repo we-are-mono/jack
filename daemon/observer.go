@@ -14,13 +14,13 @@ package daemon
 
 import (
 	"fmt"
-	"log"
 	"net"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/vishvananda/netlink"
+	"github.com/we-are-mono/jack/daemon/logger"
 	"github.com/we-are-mono/jack/types"
 	"golang.org/x/sys/unix"
 )
@@ -56,7 +56,8 @@ func NewNetworkObserver(s *Server) *NetworkObserver {
 	}
 
 	if autoReconcile {
-		log.Printf("[OBSERVER] Auto-reconciliation enabled (interval: %v)", reconcileInterval)
+		logger.Info("Auto-reconciliation enabled",
+			logger.Field{Key: "interval", Value: reconcileInterval.String()})
 	}
 
 	return &NetworkObserver{
@@ -77,18 +78,29 @@ func (o *NetworkObserver) Run(done chan struct{}) error {
 
 	// Subscribe to netlink events
 	if err := netlink.LinkSubscribe(o.linkCh, monitorDone); err != nil {
+		logger.Error("Failed to subscribe to link events",
+			logger.Field{Key: "error", Value: err.Error()})
 		return err
 	}
-	if err := netlink.AddrSubscribe(o.addrCh, monitorDone); err != nil {
-		close(monitorDone)
-		return err
-	}
-	if err := netlink.RouteSubscribe(o.routeCh, monitorDone); err != nil {
-		close(monitorDone)
-		return err
-	}
+	logger.Info("Subscribed to link events successfully")
 
-	log.Println("[OBSERVER] Network observer started - monitoring for external configuration changes")
+	if err := netlink.AddrSubscribe(o.addrCh, monitorDone); err != nil {
+		logger.Error("Failed to subscribe to address events",
+			logger.Field{Key: "error", Value: err.Error()})
+		close(monitorDone)
+		return err
+	}
+	logger.Info("Subscribed to address events successfully")
+
+	if err := netlink.RouteSubscribe(o.routeCh, monitorDone); err != nil {
+		logger.Error("Failed to subscribe to route events",
+			logger.Field{Key: "error", Value: err.Error()})
+		close(monitorDone)
+		return err
+	}
+	logger.Info("Subscribed to route events successfully")
+
+	logger.Info("Network observer started - monitoring for external configuration changes")
 
 	// Event loop
 	for {
@@ -101,7 +113,7 @@ func (o *NetworkObserver) Run(done chan struct{}) error {
 			o.handleRouteUpdate(update)
 		case <-done:
 			close(monitorDone)
-			log.Println("[OBSERVER] Network observer stopped")
+			logger.Info("Network observer stopped")
 			return nil
 		}
 	}
@@ -109,13 +121,14 @@ func (o *NetworkObserver) Run(done chan struct{}) error {
 
 // handleLinkUpdate processes link (interface) change events
 func (o *NetworkObserver) handleLinkUpdate(update netlink.LinkUpdate) {
+	link := update.Link
+	attrs := link.Attrs()
+
 	// Ignore events from Jack's own changes (within 1 second)
 	if o.isRecentChange() {
 		return
 	}
 
-	link := update.Link
-	attrs := link.Attrs()
 	flags := update.IfInfomsg.Flags
 
 	// Determine state
@@ -123,18 +136,18 @@ func (o *NetworkObserver) handleLinkUpdate(update netlink.LinkUpdate) {
 	isRunning := flags&unix.IFF_RUNNING != 0
 
 	// Log the change
-	log.Printf("[OBSERVER] Link change detected: %s (index=%d, up=%v, running=%v, mtu=%d, type=%s)",
-		attrs.Name,
-		attrs.Index,
-		isUp,
-		isRunning,
-		attrs.MTU,
-		link.Type(),
-	)
+	logger.Info("Link change detected",
+		logger.Field{Key: "interface", Value: attrs.Name},
+		logger.Field{Key: "index", Value: attrs.Index},
+		logger.Field{Key: "up", Value: isUp},
+		logger.Field{Key: "running", Value: isRunning},
+		logger.Field{Key: "mtu", Value: attrs.MTU},
+		logger.Field{Key: "type", Value: link.Type()})
 
 	// Phase 2: Compare with Jack's desired state
 	if drift := o.checkLinkDrift(attrs.Name, isUp, attrs.MTU); drift != "" {
-		log.Printf("[OBSERVER] Configuration drift detected: %s", drift)
+		logger.Warn("Configuration drift detected",
+			logger.Field{Key: "drift", Value: drift})
 		// Phase 3: Trigger reconciliation if enabled
 		o.maybeReconcile()
 	}
@@ -159,17 +172,17 @@ func (o *NetworkObserver) handleAddrUpdate(update netlink.AddrUpdate) {
 		action = "added"
 	}
 
-	log.Printf("[OBSERVER] Address %s on interface %s (index=%d): %v",
-		action,
-		linkName,
-		update.LinkIndex,
-		update.LinkAddress,
-	)
+	logger.Info("Address change detected",
+		logger.Field{Key: "action", Value: action},
+		logger.Field{Key: "interface", Value: linkName},
+		logger.Field{Key: "index", Value: update.LinkIndex},
+		logger.Field{Key: "address", Value: update.LinkAddress.String()})
 
 	// Phase 2: Compare with Jack's desired addresses
 	if linkName != "unknown" && update.LinkAddress.IP != nil {
 		if drift := o.checkAddressDrift(linkName, update.LinkAddress.IP.String(), update.NewAddr); drift != "" {
-			log.Printf("[OBSERVER] Configuration drift detected: %s", drift)
+			logger.Warn("Configuration drift detected",
+				logger.Field{Key: "drift", Value: drift})
 			// Phase 3: Trigger reconciliation if enabled
 			o.maybeReconcile()
 		}
@@ -200,17 +213,17 @@ func (o *NetworkObserver) handleRouteUpdate(update netlink.RouteUpdate) {
 		}
 	}
 
-	log.Printf("[OBSERVER] Route %s: dst=%v via=%v dev=%s table=%d",
-		action,
-		route.Dst,
-		route.Gw,
-		linkName,
-		route.Table,
-	)
+	logger.Info("Route change detected",
+		logger.Field{Key: "action", Value: action},
+		logger.Field{Key: "dst", Value: route.Dst},
+		logger.Field{Key: "via", Value: route.Gw},
+		logger.Field{Key: "dev", Value: linkName},
+		logger.Field{Key: "table", Value: route.Table})
 
 	// Phase 2: Compare with Jack's desired routes
 	if drift := o.checkRouteDrift(&route, action); drift != "" {
-		log.Printf("[OBSERVER] Configuration drift detected: %s", drift)
+		logger.Warn("Configuration drift detected",
+			logger.Field{Key: "drift", Value: drift})
 		// Phase 3: Trigger reconciliation if enabled
 		o.maybeReconcile()
 	}
@@ -407,8 +420,9 @@ func (o *NetworkObserver) maybeReconcile() {
 
 	// Check rate limit
 	if time.Since(o.lastReconcile) < o.reconcileInterval {
-		log.Printf("[OBSERVER] Reconciliation rate limited (last reconcile: %v ago, interval: %v)",
-			time.Since(o.lastReconcile), o.reconcileInterval)
+		logger.Info("Reconciliation rate limited",
+			logger.Field{Key: "last_reconcile_ago", Value: time.Since(o.lastReconcile).String()},
+			logger.Field{Key: "interval", Value: o.reconcileInterval.String()})
 		return
 	}
 
@@ -416,7 +430,7 @@ func (o *NetworkObserver) maybeReconcile() {
 	o.lastReconcile = time.Now()
 
 	// Trigger reconciliation
-	log.Println("[OBSERVER] Triggering automatic reconciliation due to drift")
+	logger.Info("Triggering automatic reconciliation due to drift")
 	go o.reconcile()
 }
 
@@ -429,8 +443,9 @@ func (o *NetworkObserver) reconcile() {
 	resp := o.server.handleApply()
 
 	if resp.Success {
-		log.Println("[OBSERVER] Automatic reconciliation completed successfully")
+		logger.Info("Automatic reconciliation completed successfully")
 	} else {
-		log.Printf("[OBSERVER] Automatic reconciliation failed: %v", resp.Error)
+		logger.Error("Automatic reconciliation failed",
+			logger.Field{Key: "error", Value: resp.Error})
 	}
 }

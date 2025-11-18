@@ -14,17 +14,17 @@ package cmd
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/we-are-mono/jack/daemon"
+	"github.com/we-are-mono/jack/daemon/logger"
 )
 
 var applyOnStart bool
@@ -43,7 +43,10 @@ func init() {
 
 func runDaemon(cmd *cobra.Command, args []string) {
 	// Check for existing daemon via PID file
-	pidFile := "/var/run/jack.pid"
+	pidFile := os.Getenv("JACK_PID_FILE")
+	if pidFile == "" {
+		pidFile = "/var/run/jack.pid"
+	}
 	if err := checkExistingDaemon(pidFile); err != nil {
 		fmt.Fprintf(os.Stderr, "[ERROR] %v\n", err)
 		os.Exit(1)
@@ -56,53 +59,16 @@ func runDaemon(cmd *cobra.Command, args []string) {
 	}
 	defer os.Remove(pidFile)
 
-	// Set up file logging
-	logDir := "/var/log/jack"
-	logFile := filepath.Join(logDir, "jack.log")
-
-	// Create log directory if it doesn't exist
-	if err := os.MkdirAll(logDir, 0755); err != nil {
-		log.Printf("[WARN] Could not create log directory %s: %v", logDir, err)
-		log.Println("[INFO] Logging to stdout only")
-	} else {
-		// Open log file
-		file, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-		if err != nil {
-			log.Printf("[WARN] Could not open log file %s: %v", logFile, err)
-			log.Println("[INFO] Logging to stdout only")
-		} else {
-			// Redirect both log and stdout to both file and original stdout
-			mw := io.MultiWriter(os.Stdout, file)
-			log.SetOutput(mw)
-
-			// IMPORTANT: Also redirect os.Stdout so fmt.Println() goes to log file
-			// Save original stdout first
-			originalStdout := os.Stdout
-			r, w, err := os.Pipe()
-			if err != nil {
-				log.Printf("[WARN] Could not create pipe for stdout redirection: %v", err)
-			} else {
-				os.Stdout = w
-
-				// Copy from pipe to multiwriter
-				go func() {
-					_, _ = io.Copy(mw, r) //nolint:errcheck // Error intentionally ignored - logging background task
-				}()
-			}
-
-			log.Printf("[INFO] Logging to stdout and %s", logFile)
-
-			// Ensure file and stdout are restored on exit
-			defer func() {
-				file.Close()
-				os.Stdout = originalStdout
-			}()
-		}
+	// Initialize structured logger
+	if err := initializeLogger(); err != nil {
+		fmt.Fprintf(os.Stderr, "[ERROR] Failed to initialize logger: %v\n", err)
+		os.Exit(1)
 	}
 
 	server, err := daemon.NewServer()
 	if err != nil {
-		log.Fatalf("[ERROR] Failed to create server: %v", err)
+		logger.Error("Failed to create server", logger.Field{Key: "error", Value: err.Error()})
+		os.Exit(1)
 	}
 
 	// Handle shutdown gracefully
@@ -111,16 +77,17 @@ func runDaemon(cmd *cobra.Command, args []string) {
 
 	go func() {
 		<-sigChan
-		log.Println("Shutting down...")
+		logger.Info("Shutting down...")
 		if err := server.Stop(); err != nil {
-			log.Printf("[ERROR] Failed to stop server: %v", err)
+			logger.Error("Failed to stop server", logger.Field{Key: "error", Value: err.Error()})
 		}
 		os.Exit(0)
 	}()
 
 	// Start server (with optional apply on startup)
 	if err := server.Start(applyOnStart); err != nil {
-		log.Fatalf("[ERROR] Server failed: %v", err)
+		logger.Error("Server failed", logger.Field{Key: "error", Value: err.Error()})
+		os.Exit(1)
 	}
 }
 
@@ -168,4 +135,64 @@ func checkExistingDaemon(pidFile string) error {
 func writePIDFile(pidFile string) error {
 	pid := os.Getpid()
 	return os.WriteFile(pidFile, []byte(fmt.Sprintf("%d\n", pid)), 0600)
+}
+
+// initializeLogger sets up the structured logger with default configuration
+func initializeLogger() error {
+	// Default configuration
+	config := logger.Config{
+		Level:     "info",
+		Format:    "json",
+		Component: "daemon",
+	}
+
+	// Determine outputs: try journald first, fall back to file
+	useJournald := false
+
+	// Check if systemd-cat is available
+	if _, err := exec.LookPath("systemd-cat"); err == nil {
+		useJournald = true
+	}
+
+	// Create backends
+	var backends []logger.Backend
+	emitter := logger.NewEmitter()
+
+	if useJournald {
+		journaldBackend, err := logger.NewJournaldBackend(config.Format)
+		if err != nil {
+			// Fall back to file if journald fails
+			log.Printf("[WARN] Could not initialize journald backend: %v, falling back to file", err)
+			useJournald = false
+		} else {
+			backends = append(backends, journaldBackend)
+		}
+	}
+
+	if !useJournald {
+		// Use file backend
+		logFile := "/var/log/jack/jack.log"
+		fileBackend, err := logger.NewFileBackend(logFile, config.Format)
+		if err != nil {
+			return fmt.Errorf("failed to initialize file backend: %w", err)
+		}
+		backends = append(backends, fileBackend)
+	}
+
+	// Initialize global logger
+	logger.Init(config, backends, emitter)
+
+	// Log initialization message
+	if useJournald {
+		logger.Info("Logging initialized",
+			logger.Field{Key: "backend", Value: "journald"},
+			logger.Field{Key: "format", Value: config.Format})
+	} else {
+		logger.Info("Logging initialized",
+			logger.Field{Key: "backend", Value: "file"},
+			logger.Field{Key: "file", Value: "/var/log/jack/jack.log"},
+			logger.Field{Key: "format", Value: config.Format})
+	}
+
+	return nil
 }

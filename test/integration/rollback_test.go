@@ -17,8 +17,6 @@ package integration
 import (
 	"context"
 	"net"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -28,6 +26,7 @@ import (
 	"github.com/we-are-mono/jack/client"
 	"github.com/we-are-mono/jack/daemon"
 	"github.com/we-are-mono/jack/system"
+	"github.com/we-are-mono/jack/types"
 )
 
 func TestSnapshotCapture(t *testing.T) {
@@ -136,30 +135,45 @@ func TestApplyWithAutomaticRollback(t *testing.T) {
 	require.NoError(t, netlink.AddrAdd(link, addr))
 	require.NoError(t, netlink.LinkSetUp(link))
 
-	// Create invalid config that will fail apply
-	invalidConfig := `{
-		"interfaces": {
-			"` + ifaceName + `": {
-				"device": "` + ifaceName + `",
-				"type": "physical",
-				"ipaddr": "10.0.0.2",
-				"netmask": "255.255.255.0"
-			},
-			"invalid-iface": {
-				"device": "nonexistent",
-				"type": "physical",
-				"ipaddr": "192.168.1.1",
-				"netmask": "255.255.255.0"
-			}
-		}
-	}`
+	// Create invalid config with nonexistent interface
+	invalidInterfaces := map[string]types.Interface{
+		ifaceName: {
+			Device:   ifaceName,
+			Type:     "physical",
+			IPAddr:   "10.0.0.2",
+			Netmask:  "255.255.255.0",
+			Enabled:  true,
+			Protocol: "static",
+		},
+		"invalid-iface": {
+			Device:   "nonexistent",
+			Type:     "physical",
+			IPAddr:   "192.168.1.1",
+			Netmask:  "255.255.255.0",
+			Enabled:  true,
+			Protocol: "static",
+		},
+	}
 
-	err = os.WriteFile(filepath.Join(harness.configDir, "interfaces.json"), []byte(invalidConfig), 0644)
+	// Set and commit the invalid config
+	_, err = harness.SendRequest(daemon.Request{
+		Command: "set",
+		Path:    "interfaces",
+		Value:   invalidInterfaces,
+	})
+	require.NoError(t, err)
+
+	_, err = harness.SendRequest(daemon.Request{Command: "commit"})
 	require.NoError(t, err)
 
 	// Try to apply (should fail and rollback)
-	resp, err := client.Send(daemon.Request{Command: "apply"})
+	resp, err := harness.SendRequest(daemon.Request{Command: "apply"})
 	require.NoError(t, err)
+	if resp.Success {
+		t.Logf("Apply unexpectedly succeeded. Expected failure for nonexistent interface")
+	} else {
+		t.Logf("Apply failed as expected with error: %s", resp.Error)
+	}
 	assert.False(t, resp.Success)
 	assert.Contains(t, resp.Error, "rolled back")
 

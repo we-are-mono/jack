@@ -27,12 +27,12 @@ func main() {
 
 	log.Println("Starting nftables plugin...")
 
-	// Create the plugin adapter
-	adapter, err := NewPluginAdapter()
+	// Create the RPC provider directly
+	provider, err := NewNftablesRPCProvider()
 	if err != nil {
-		log.Fatalf("Failed to create plugin adapter: %v", err)
+		log.Fatalf("Failed to create nftables provider: %v", err)
 	}
 
-	// Serve the plugin using generic protocol
-	jplugin.ServePlugin(jplugin.NewPluginAdapter(adapter))
+	// Serve the plugin using RPC protocol
+	jplugin.ServePlugin(provider)
 }

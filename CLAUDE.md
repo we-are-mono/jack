@@ -66,23 +66,27 @@ Plugins use **HashiCorp go-plugin with RPC communication**:
 - **wireguard** (`plugins/core/wireguard/`) - VPN tunnel management (client and server)
 - **monitoring** (`plugins/core/monitoring/`) - System health checks and metrics
 
-### Plugin Implementation Pattern
+### Plugin Implementation Pattern (Modern Direct RPC)
 
 Each plugin must:
-1. Implement the generic plugin adapter interface
-2. Provide `ApplyConfig`, `Validate`, `Flush`, `Enable`, `Disable`, `Status` methods
-3. Use the `jplugin.ServePlugin()` helper to expose RPC interface
-4. Handle configuration in a `types.go` file with JSON struct tags
-5. Implement actual functionality in separate files (e.g., `nftables.go`, `wireguard.go`)
+1. Implement the `Provider` interface directly (from `plugins/rpc.go`)
+2. Provide all RPC methods: `Metadata`, `ApplyConfig`, `ValidateConfig`, `Flush`, `Status`, `ExecuteCLICommand`, `OnLogEvent`
+3. Use `context.Context` for all methods to support cancellation
+4. Handle JSON marshaling/unmarshaling at the RPC boundary
+5. Use `plugins.ServePlugin()` helper to expose RPC interface
+6. Define configuration structs in `types.go` with JSON struct tags
+7. Implement core functionality in provider-specific files
 
 Example structure:
 ```
 plugins/core/example/
-├── main.go          # Plugin entry point with RPC setup
-├── adapter.go       # Implements generic plugin adapter
+├── main.go          # Plugin entry point - calls ServePlugin(provider)
+├── rpc_provider.go  # Implements Provider interface with all 7 RPC methods
 ├── types.go         # Configuration structs
-└── example.go       # Core functionality
+└── example.go       # Core functionality (business logic)
 ```
+
+**DEPRECATED**: The legacy `Plugin` interface and `PluginAdapter` wrapper are deprecated. They lack support for CLI commands, log events, and context-based cancellation. All core plugins use the modern Direct RPC pattern.
 
 **When adding new functionality, create a new plugin instead of modifying the daemon core.**
 
@@ -157,8 +161,8 @@ type PluginMetadata struct {
 
 **DefaultConfig Example**:
 ```go
-func (p *MonitoringAdapter) Metadata() plugins.PluginMetadata {
-    return plugins.PluginMetadata{
+func (p *MonitoringRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse, error) {
+    return plugins.MetadataResponse{
         Namespace:   "monitoring",
         Version:     "1.0.0",
         Description: "System and network metrics collection",
@@ -167,20 +171,21 @@ func (p *MonitoringAdapter) Metadata() plugins.PluginMetadata {
             "enabled": true,
             "collection_interval": 5,
         },
-    }
+    }, nil
 }
 ```
 
 ### RPC Interface
 
-Plugins implement the following RPC methods (via `plugins/rpc.go`):
+Plugins implement the `Provider` interface with the following RPC methods (via `plugins/rpc.go`):
 
-- **`Metadata()`** - Returns plugin metadata (namespace, version, defaults)
-- **`ApplyConfig(configJSON []byte)`** - Apply configuration to the system
-- **`ValidateConfig(configJSON []byte)`** - Validate configuration without applying
-- **`Flush()`** - Remove all plugin-managed system state (cleanup)
-- **`Status()`** - Return current plugin status as JSON
-- **`Close()`** - Gracefully shut down plugin
+- **`Metadata(ctx context.Context) (MetadataResponse, error)`** - Returns plugin metadata (namespace, version, defaults, CLI commands)
+- **`ApplyConfig(ctx context.Context, configJSON []byte) error`** - Apply configuration to the system
+- **`ValidateConfig(ctx context.Context, configJSON []byte) error`** - Validate configuration without applying
+- **`Flush(ctx context.Context) error`** - Remove all plugin-managed system state (cleanup)
+- **`Status(ctx context.Context) ([]byte, error)`** - Return current plugin status as JSON
+- **`ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error)`** - Execute plugin-provided CLI commands
+- **`OnLogEvent(ctx context.Context, logEventJSON []byte) error`** - Receive log events from daemon (optional, return error if not implemented)
 
 ### Plugin State Management
 
@@ -198,19 +203,29 @@ The daemon maintains plugin state in two places:
 
 ### Creating a New Plugin
 
-To create a new plugin:
+To create a new plugin using the modern Direct RPC pattern:
 
 1. Create directory: `plugins/core/<name>/`
 2. Implement files:
-   - `main.go` - Entry point with `jplugin.ServePlugin()`
-   - `adapter.go` - Implements `PluginAdapter` interface with `Metadata()`, `ApplyConfig()`, etc.
+   - `main.go` - Entry point that creates RPC provider and calls `plugins.ServePlugin(provider)`
+   - `rpc_provider.go` - Implements `plugins.Provider` interface with all 7 RPC methods
    - `types.go` - Configuration structs with JSON tags
-   - `<name>.go` - Core functionality implementation
+   - `<name>.go` - Core functionality (business logic) implementation
 
-3. Register plugin metadata with optional `DefaultConfig`
+3. Implement all Provider methods:
+   - `Metadata()` - Return plugin metadata with optional `DefaultConfig` and `CLICommands`
+   - `ApplyConfig()` - Unmarshal JSON config and apply to system
+   - `ValidateConfig()` - Unmarshal JSON config and validate without applying
+   - `Flush()` - Remove all plugin-managed state
+   - `Status()` - Return status as marshaled JSON
+   - `ExecuteCLICommand()` - Handle plugin CLI commands (or return error if not supported)
+   - `OnLogEvent()` - Handle log events (or return error if not supported)
+
 4. Build with correct architecture: `GOOS=linux GOARCH=arm64 go build -o jack-plugin-<name>`
 5. Deploy to `/usr/lib/jack/plugins/`
 6. Enable via `jack plugin enable <name>`
+
+**Reference Implementation**: See `plugins/core/monitoring/rpc_provider.go` for a complete example of the modern pattern.
 
 ### Plugin CLI Commands System
 

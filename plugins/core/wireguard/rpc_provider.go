@@ -13,68 +13,53 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/we-are-mono/jack/plugins"
 )
 
-// VPNAdapter adapts the WireGuard provider to the unified Plugin interface.
-type VPNAdapter struct {
+// WireGuardRPCProvider implements the Provider interface with direct RPC support
+type WireGuardRPCProvider struct {
 	provider *WireGuardProvider
 }
 
-// NewVPNAdapter creates a new VPN plugin adapter
-func NewVPNAdapter() (*VPNAdapter, error) {
+// NewWireGuardRPCProvider creates a new RPC provider for WireGuard
+func NewWireGuardRPCProvider() (*WireGuardRPCProvider, error) {
 	provider, err := New()
 	if err != nil {
 		return nil, err
 	}
 
-	return &VPNAdapter{
+	return &WireGuardRPCProvider{
 		provider: provider,
 	}, nil
 }
 
-// Metadata returns information about what this plugin provides
-func (p *VPNAdapter) Metadata() plugins.PluginMetadata {
-	return plugins.PluginMetadata{
+// Metadata returns plugin information
+func (p *WireGuardRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse, error) {
+	return plugins.MetadataResponse{
 		Namespace:   "vpn",
 		Version:     "1.0.0",
 		Description: "WireGuard-based VPN management",
 		Category:    "vpn",
 		ConfigPath:  "/etc/jack/vpn.json",
-	}
+	}, nil
 }
 
 // ApplyConfig applies VPN configuration
-func (p *VPNAdapter) ApplyConfig(config interface{}) error {
-	// Config comes in as a generic map from JSON unmarshaling
-	// We need to re-marshal and unmarshal to get the right type
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-
-	// Debug: log the raw config
-	println("[WIREGUARD-ADAPTER] Received config JSON:", string(configJSON))
-
+func (p *WireGuardRPCProvider) ApplyConfig(ctx context.Context, configJSON []byte) error {
 	var vpnConfig VPNConfig
 	if err := json.Unmarshal(configJSON, &vpnConfig); err != nil {
-		println("[WIREGUARD-ADAPTER] Failed to unmarshal config:", err.Error())
 		return err
 	}
 
-	println("[WIREGUARD-ADAPTER] Unmarshaled config - interfaces count:", len(vpnConfig.Interfaces))
 	return p.provider.ApplyConfig(nil, &vpnConfig)
 }
 
 // ValidateConfig validates VPN configuration
-func (p *VPNAdapter) ValidateConfig(config interface{}) error {
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-
+func (p *WireGuardRPCProvider) ValidateConfig(ctx context.Context, configJSON []byte) error {
 	var vpnConfig VPNConfig
 	if err := json.Unmarshal(configJSON, &vpnConfig); err != nil {
 		return err
@@ -84,25 +69,33 @@ func (p *VPNAdapter) ValidateConfig(config interface{}) error {
 }
 
 // Flush removes all VPN tunnels
-func (p *VPNAdapter) Flush() error {
+func (p *WireGuardRPCProvider) Flush(ctx context.Context) error {
 	return p.provider.Flush(nil)
 }
 
-// Status returns the current VPN status
-func (p *VPNAdapter) Status() (interface{}, error) {
+// Status returns current status as JSON
+func (p *WireGuardRPCProvider) Status(ctx context.Context) ([]byte, error) {
 	enabled, provider, tunnels, err := p.provider.Status(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return map[string]interface{}{
+	statusMap := map[string]interface{}{
 		"enabled":  enabled,
 		"provider": provider,
 		"tunnels":  tunnels,
-	}, nil
+	}
+
+	return json.Marshal(statusMap)
 }
 
-// Close terminates the plugin
-func (p *VPNAdapter) Close() error {
-	return nil
+// OnLogEvent is not implemented for the wireguard plugin
+func (p *WireGuardRPCProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	return fmt.Errorf("plugin does not implement log event handling")
+}
+
+// ExecuteCLICommand executes CLI commands provided by this plugin
+func (p *WireGuardRPCProvider) ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error) {
+	// Future: could add commands like "jack vpn status", "jack vpn restart"
+	return nil, fmt.Errorf("plugin does not implement CLI commands")
 }

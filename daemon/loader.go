@@ -16,8 +16,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 
+	"github.com/we-are-mono/jack/daemon/logger"
 	"github.com/we-are-mono/jack/plugins"
 )
 
@@ -39,7 +39,9 @@ func LoadPlugin(name string) (plugins.Plugin, error) {
 		return nil, fmt.Errorf("plugin '%s' not found: %w", name, err)
 	}
 
-	log.Printf("[LOADER] Found plugin '%s' at: %s", name, pluginPath)
+	logger.Info("Found plugin",
+		logger.Field{Key: "plugin", Value: name},
+		logger.Field{Key: "path", Value: pluginPath})
 
 	// Start the plugin
 	client, err := plugins.NewPluginClient(pluginPath)
@@ -61,8 +63,10 @@ func LoadPlugin(name string) (plugins.Plugin, error) {
 		return nil, fmt.Errorf("failed to get metadata from plugin '%s': %w", name, err)
 	}
 
-	log.Printf("[LOADER] Plugin '%s' provides namespace: %s (v%s)",
-		name, metaResp.Namespace, metaResp.Version)
+	logger.Info("Plugin provides namespace",
+		logger.Field{Key: "plugin", Value: name},
+		logger.Field{Key: "namespace", Value: metaResp.Namespace},
+		logger.Field{Key: "version", Value: metaResp.Version})
 
 	// Convert metadata response to PluginMetadata
 	metadata := plugins.PluginMetadata{
@@ -97,7 +101,9 @@ func (l *PluginLoader) ApplyConfig(config interface{}) error {
 	}
 
 	// Debug logging
-	log.Printf("[LOADER] Sending config to plugin %s: %s", l.metadata.Namespace, string(configJSON))
+	logger.Info("Sending config to plugin",
+		logger.Field{Key: "plugin", Value: l.metadata.Namespace},
+		logger.Field{Key: "config", Value: string(configJSON)})
 
 	// Send to plugin via RPC
 	return l.provider.ApplyConfig(context.TODO(), configJSON)
@@ -150,6 +156,12 @@ func (l *PluginLoader) ExecuteCLICommand(ctx context.Context, command string, ar
 	return l.provider.ExecuteCLICommand(ctx, command, args)
 }
 
+// GetProvider returns the underlying RPC provider for direct access
+// This is used by the daemon to register log subscribers
+func (l *PluginLoader) GetProvider() plugins.Provider {
+	return l.provider
+}
+
 // ScanPlugins discovers all available plugins in plugin directories
 // Returns a map of plugin name → metadata (without loading into registry)
 func ScanPlugins() (map[string]plugins.PluginMetadata, error) {
@@ -165,7 +177,9 @@ func ScanPlugins() (map[string]plugins.PluginMetadata, error) {
 		// Temporarily load plugin to get metadata
 		plugin, err := LoadPlugin(pluginName)
 		if err != nil {
-			log.Printf("[WARN] Failed to load plugin '%s' for scanning: %v", pluginName, err)
+			logger.Warn("Failed to load plugin for scanning",
+				logger.Field{Key: "plugin", Value: pluginName},
+				logger.Field{Key: "error", Value: err.Error()})
 			continue
 		}
 
@@ -174,7 +188,9 @@ func ScanPlugins() (map[string]plugins.PluginMetadata, error) {
 
 		// Close the temp instance
 		if err := plugin.Close(); err != nil {
-			log.Printf("[WARN] Failed to close temp plugin '%s': %v", pluginName, err)
+			logger.Warn("Failed to close temp plugin",
+				logger.Field{Key: "plugin", Value: pluginName},
+				logger.Field{Key: "error", Value: err.Error()})
 		}
 	}
 
@@ -184,7 +200,8 @@ func ScanPlugins() (map[string]plugins.PluginMetadata, error) {
 // UnloadPlugin flushes and closes a plugin
 // This should be called before removing it from the registry
 func UnloadPlugin(plugin plugins.Plugin, namespace string) error {
-	log.Printf("[LOADER] Unloading plugin: %s", namespace)
+	logger.Info("Unloading plugin",
+		logger.Field{Key: "plugin", Value: namespace})
 
 	// Flush system state
 	if err := plugin.Flush(); err != nil {
@@ -196,7 +213,8 @@ func UnloadPlugin(plugin plugins.Plugin, namespace string) error {
 		return fmt.Errorf("failed to close plugin '%s': %w", namespace, err)
 	}
 
-	log.Printf("[LOADER] Successfully unloaded plugin: %s", namespace)
+	logger.Info("Successfully unloaded plugin",
+		logger.Field{Key: "plugin", Value: namespace})
 	return nil
 }
 

@@ -25,9 +25,18 @@ type ObserverConfig struct {
 	ReconcileIntervalMS int  `json:"reconcile_interval_ms"` // Minimum time between reconciliations (default: 60000ms = 1 minute)
 }
 
+// LoggingConfig represents configuration for the logging system
+type LoggingConfig struct {
+	Level   string   `json:"level"`   // debug, info, warn, error (default: info)
+	Format  string   `json:"format"`  // text, json (default: json)
+	Outputs []string `json:"outputs"` // ["file", "journald"] (default: auto-detect)
+	File    string   `json:"file"`    // Log file path (default: /var/log/jack/jack.log)
+}
+
 // JackConfig represents the main Jack configuration (/etc/jack/jack.json)
 type JackConfig struct {
 	Plugins  map[string]PluginState `json:"plugins"`  // Map of plugin name to state
 	Observer *ObserverConfig        `json:"observer"` // Observer configuration (optional)
+	Logging  *LoggingConfig         `json:"logging"`  // Logging configuration (optional)
 	Version  string                 `json:"version"`
 }

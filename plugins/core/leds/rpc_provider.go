@@ -24,31 +24,28 @@ import (
 
 // LEDRPCProvider implements the Provider interface with CLI command support
 type LEDRPCProvider struct {
-	adapter *LEDAdapter
+	provider *LEDProvider
 }
 
 // NewLEDRPCProvider creates a new RPC provider for LED control
 func NewLEDRPCProvider() *LEDRPCProvider {
-	adapter := NewLEDAdapter()
+	provider := NewLEDProvider()
 
 	return &LEDRPCProvider{
-		adapter: adapter,
+		provider: provider,
 	}
 }
 
 // Metadata returns plugin information including CLI commands
 func (p *LEDRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse, error) {
-	meta := p.adapter.Metadata()
-
 	return plugins.MetadataResponse{
-		Namespace:     meta.Namespace,
-		Version:       meta.Version,
-		Description:   meta.Description,
-		Category:      meta.Category,
-		ConfigPath:    meta.ConfigPath,
-		DefaultConfig: meta.DefaultConfig,
-		Dependencies:  meta.Dependencies,
-		PathPrefix:    meta.PathPrefix, // Include path prefix for automatic path rewriting
+		Namespace:     "led",
+		Version:       "1.0.0",
+		Description:   "System LED control via sysfs",
+		Category:      "hardware",
+		ConfigPath:    "/etc/jack/led.json",
+		DefaultConfig: nil,    // Empty config - LEDs are configured via /etc/jack/led.json
+		PathPrefix:    "leds", // Auto-insert "leds" in paths: led.status:green -> led.leds.status:green
 		CLICommands: []plugins.CLICommand{
 			{
 				Name:         "led",
@@ -64,34 +61,39 @@ func (p *LEDRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse
 
 // ApplyConfig applies LED configuration
 func (p *LEDRPCProvider) ApplyConfig(ctx context.Context, configJSON []byte) error {
-	var config interface{}
+	var config LEDConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return err
 	}
-	return p.adapter.ApplyConfig(config)
+	return p.provider.ApplyConfig(&config)
 }
 
 // ValidateConfig validates LED configuration
 func (p *LEDRPCProvider) ValidateConfig(ctx context.Context, configJSON []byte) error {
-	var config interface{}
+	var config LEDConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return err
 	}
-	return p.adapter.ValidateConfig(config)
+	return p.provider.ValidateConfig(&config)
 }
 
 // Flush removes all configuration
 func (p *LEDRPCProvider) Flush(ctx context.Context) error {
-	return p.adapter.Flush()
+	return p.provider.Flush()
 }
 
 // Status returns current status as JSON
 func (p *LEDRPCProvider) Status(ctx context.Context) ([]byte, error) {
-	status, err := p.adapter.Status()
+	status, err := p.provider.Status()
 	if err != nil {
 		return nil, err
 	}
 	return json.Marshal(status)
+}
+
+// OnLogEvent is not implemented for the LEDs plugin
+func (p *LEDRPCProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	return fmt.Errorf("plugin does not implement log event handling")
 }
 
 // ExecuteCLICommand executes CLI commands provided by this plugin
@@ -125,7 +127,7 @@ func (p *LEDRPCProvider) ExecuteCLICommand(ctx context.Context, command string, 
 // executeStatus returns formatted LED status
 func (p *LEDRPCProvider) executeStatus() ([]byte, error) {
 	// Get status from provider
-	statusData, err := p.adapter.Status()
+	statusData, err := p.provider.Status()
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +167,7 @@ func (p *LEDRPCProvider) executeStatus() ([]byte, error) {
 // executeList returns a list of available LEDs with their capabilities
 func (p *LEDRPCProvider) executeList() ([]byte, error) {
 	// Get status from provider (which includes all LEDs)
-	statusData, err := p.adapter.Status()
+	statusData, err := p.provider.Status()
 	if err != nil {
 		return nil, err
 	}

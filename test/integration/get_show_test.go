@@ -65,11 +65,12 @@ func TestGetEntireConfiguration(t *testing.T) {
 		},
 	}
 
-	routes := []types.Route{
-		{
+	routes := map[string]types.Route{
+		"test-route": {
 			Destination: "192.168.1.0/24",
 			Gateway:     "10.4.1.1",
 			Metric:      100,
+			Enabled:     true,
 		},
 	}
 
@@ -102,7 +103,7 @@ func TestGetEntireConfiguration(t *testing.T) {
 
 	var config struct {
 		Interfaces map[string]types.Interface `json:"interfaces"`
-		Routes     []types.Route               `json:"routes"`
+		Routes     map[string]types.Route      `json:"routes"`
 	}
 	err = json.Unmarshal(dataBytes, &config)
 	require.NoError(t, err)
@@ -115,7 +116,8 @@ func TestGetEntireConfiguration(t *testing.T) {
 
 	// Verify routes
 	require.Len(t, config.Routes, 1)
-	assert.Equal(t, "192.168.1.0/24", config.Routes[0].Destination)
+	require.Contains(t, config.Routes, "test-route")
+	assert.Equal(t, "192.168.1.0/24", config.Routes["test-route"].Destination)
 }
 
 // TestGetSpecificPath tests path-based configuration retrieval
@@ -147,11 +149,12 @@ func TestGetSpecificPath(t *testing.T) {
 		},
 	}
 
-	routes := []types.Route{
-		{
+	routes := map[string]types.Route{
+		"test-route-2": {
 			Destination: "192.168.2.0/24",
 			Gateway:     "10.4.2.1",
 			Metric:      100,
+			Enabled:     true,
 		},
 	}
 
@@ -204,12 +207,13 @@ func TestGetSpecificPath(t *testing.T) {
 	dataBytes, err = json.Marshal(resp.Data)
 	require.NoError(t, err)
 
-	var retrievedRoutes []types.Route
+	var retrievedRoutes map[string]types.Route
 	err = json.Unmarshal(dataBytes, &retrievedRoutes)
 	require.NoError(t, err)
 
 	require.Len(t, retrievedRoutes, 1)
-	assert.Equal(t, "192.168.2.0/24", retrievedRoutes[0].Destination)
+	require.Contains(t, retrievedRoutes, "test-route-2")
+	assert.Equal(t, "192.168.2.0/24", retrievedRoutes["test-route-2"].Destination)
 }
 
 // TestGetInvalidPath tests getting configuration from non-existent path

@@ -13,46 +13,43 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/we-are-mono/jack/plugins"
 )
 
-// DHCPAdapter adapts the dnsmasq provider to the unified Plugin interface.
-type DHCPAdapter struct {
+// DnsmasqRPCProvider implements the Provider interface with direct RPC support
+type DnsmasqRPCProvider struct {
 	provider *DnsmasqProvider
 }
 
-// NewDHCPAdapter creates a new DHCP plugin adapter
-func NewDHCPAdapter() (*DHCPAdapter, error) {
+// NewDnsmasqRPCProvider creates a new RPC provider for dnsmasq
+func NewDnsmasqRPCProvider() (*DnsmasqRPCProvider, error) {
 	provider, err := NewDnsmasq()
 	if err != nil {
 		return nil, err
 	}
 
-	return &DHCPAdapter{
+	return &DnsmasqRPCProvider{
 		provider: provider,
 	}, nil
 }
 
-// Metadata returns information about what this plugin provides
-func (p *DHCPAdapter) Metadata() plugins.PluginMetadata {
-	return plugins.PluginMetadata{
+// Metadata returns plugin information
+func (p *DnsmasqRPCProvider) Metadata(ctx context.Context) (plugins.MetadataResponse, error) {
+	return plugins.MetadataResponse{
 		Namespace:   "dhcp",
 		Version:     "1.0.0",
 		Description: "dnsmasq-based DHCP server",
 		Category:    "dhcp",
 		ConfigPath:  "/etc/jack/dhcp.json",
-	}
+	}, nil
 }
 
 // ApplyConfig applies DHCP configuration
-func (p *DHCPAdapter) ApplyConfig(config interface{}) error {
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-
+func (p *DnsmasqRPCProvider) ApplyConfig(ctx context.Context, configJSON []byte) error {
 	// Check if config is empty (no meaningful configuration)
 	var configMap map[string]interface{}
 	if err := json.Unmarshal(configJSON, &configMap); err != nil {
@@ -72,12 +69,7 @@ func (p *DHCPAdapter) ApplyConfig(config interface{}) error {
 }
 
 // ValidateConfig validates DHCP configuration
-func (p *DHCPAdapter) ValidateConfig(config interface{}) error {
-	configJSON, err := json.Marshal(config)
-	if err != nil {
-		return err
-	}
-
+func (p *DnsmasqRPCProvider) ValidateConfig(ctx context.Context, configJSON []byte) error {
 	var dhcpConfig DHCPConfig
 	if err := json.Unmarshal(configJSON, &dhcpConfig); err != nil {
 		return err
@@ -87,25 +79,33 @@ func (p *DHCPAdapter) ValidateConfig(config interface{}) error {
 }
 
 // Flush stops DHCP service
-func (p *DHCPAdapter) Flush() error {
+func (p *DnsmasqRPCProvider) Flush(ctx context.Context) error {
 	return p.provider.FlushDHCP(nil)
 }
 
-// Status returns the current DHCP status
-func (p *DHCPAdapter) Status() (interface{}, error) {
+// Status returns current status as JSON
+func (p *DnsmasqRPCProvider) Status(ctx context.Context) ([]byte, error) {
 	enabled, provider, leaseCount, err := p.provider.StatusDHCP(nil)
 	if err != nil {
 		return nil, err
 	}
 
-	return map[string]interface{}{
+	statusMap := map[string]interface{}{
 		"enabled":     enabled,
 		"provider":    provider,
 		"lease_count": leaseCount,
-	}, nil
+	}
+
+	return json.Marshal(statusMap)
 }
 
-// Close terminates the plugin
-func (p *DHCPAdapter) Close() error {
-	return nil
+// OnLogEvent is not implemented for the dnsmasq plugin
+func (p *DnsmasqRPCProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	return fmt.Errorf("plugin does not implement log event handling")
+}
+
+// ExecuteCLICommand executes CLI commands provided by this plugin
+func (p *DnsmasqRPCProvider) ExecuteCLICommand(ctx context.Context, command string, args []string) ([]byte, error) {
+	// Future: could add commands like "jack dhcp leases", "jack dhcp restart"
+	return nil, fmt.Errorf("plugin does not implement CLI commands")
 }

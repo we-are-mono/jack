@@ -104,8 +104,9 @@ func createPluginCommand(pluginPath string, cliCmd plugins.CLICommand) *cobra.Co
 	if len(cliCmd.Subcommands) > 0 {
 		for _, subName := range cliCmd.Subcommands {
 			subCmd := &cobra.Command{
-				Use:   subName,
-				Short: fmt.Sprintf("%s %s", cliCmd.Name, subName),
+				Use:                subName,
+				Short:              fmt.Sprintf("%s %s", cliCmd.Name, subName),
+				DisableFlagParsing: true, // Pass all args through to plugin
 				Run: func(subCmd *cobra.Command, args []string) {
 					executePluginCommand(pluginPath, cliCmd, subCmd.Use, args)
 				},
@@ -114,6 +115,7 @@ func createPluginCommand(pluginPath string, cliCmd plugins.CLICommand) *cobra.Co
 		}
 	} else {
 		// Command has no subcommands, execute directly
+		cmd.DisableFlagParsing = true // Pass all args through to plugin
 		cmd.Run = func(cmd *cobra.Command, args []string) {
 			executePluginCommand(pluginPath, cliCmd, "", args)
 		}

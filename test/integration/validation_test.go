@@ -355,11 +355,12 @@ func TestInvalidRouteDestination(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			routes := []types.Route{
-				{
+			routes := map[string]types.Route{
+				"test-route": {
 					Destination: tc.destination,
 					Gateway:     "10.0.0.1",
 					Metric:      100,
+					Enabled:     true,
 				},
 			}
 
@@ -409,11 +410,12 @@ func TestInvalidRouteGateway(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			routes := []types.Route{
-				{
+			routes := map[string]types.Route{
+				"test-route-gw": {
 					Destination: "192.168.5.0/24",
 					Gateway:     tc.gateway,
 					Metric:      100,
+					Enabled:     true,
 				},
 			}
 
@@ -590,7 +592,7 @@ func TestEmptyConfiguration(t *testing.T) {
 	assert.True(t, resp.Success, "empty configuration should be valid")
 
 	// Empty routes
-	emptyRoutes := []types.Route{}
+	emptyRoutes := map[string]types.Route{}
 
 	_, err = harness.SendRequest(daemon.Request{
 		Command: "set",
@@ -609,6 +611,8 @@ func TestRouteMetricBoundary(t *testing.T) {
 	harness := NewTestHarness(t)
 	defer harness.Cleanup()
 
+	eth0 := harness.CreateDummyInterface("eth0")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -617,6 +621,32 @@ func TestRouteMetricBoundary(t *testing.T) {
 	}()
 
 	harness.WaitForDaemon(5 * time.Second)
+
+	// Set up an interface in the same network as the route gateway
+	interfaces := map[string]types.Interface{
+		eth0: {
+			Type:     "physical",
+			Device:   eth0,
+			Enabled:  true,
+			Protocol: "static",
+			IPAddr:   "10.0.0.2",
+			Netmask:  "255.255.255.0",
+			MTU:      1500,
+		},
+	}
+
+	_, err := harness.SendRequest(daemon.Request{
+		Command: "set",
+		Path:    "interfaces",
+		Value:   interfaces,
+	})
+	require.NoError(t, err)
+
+	_, err = harness.SendRequest(daemon.Request{Command: "commit"})
+	require.NoError(t, err)
+
+	_, err = harness.SendRequest(daemon.Request{Command: "apply"})
+	require.NoError(t, err)
 
 	testCases := []struct {
 		name   string
@@ -631,11 +661,12 @@ func TestRouteMetricBoundary(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			routes := []types.Route{
-				{
+			routes := map[string]types.Route{
+				"test-route-metric": {
 					Destination: "192.168.6.0/24",
 					Gateway:     "10.0.0.1",
 					Metric:      tc.metric,
+					Enabled:     true,
 				},
 			}
 

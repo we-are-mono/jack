@@ -11,20 +11,20 @@ echo "Building Jack for ${GOOS}/${GOARCH}..."
 echo "Version: ${VERSION}"
 echo "Build Time: ${BUILD_TIME}"
 
+# Create bin directory for all binaries
+mkdir -p bin
+
 CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
     -ldflags "-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
-    -o jack \
+    -o bin/jack \
     .
 
-echo "✓ Build complete: jack"
-echo "  Size: $(ls -lh jack | awk '{print $5}')"
+echo "✓ Build complete: bin/jack"
+echo "  Size: $(ls -lh bin/jack | awk '{print $5}')"
 
 # Build plugins
 echo ""
 echo "Building plugins..."
-
-# Create bin directory for plugin binaries
-mkdir -p bin
 
 # Build nftables plugin
 echo "  Building jack-plugin-nftables..."
@@ -81,7 +81,18 @@ echo "  Building jack-plugin-leds..."
 echo "✓ Plugin build complete: bin/jack-plugin-leds"
 echo "  Size: $(ls -lh bin/jack-plugin-leds | awk '{print $5}')"
 
+# Build SQLite3 plugin (uses pure-Go driver, no CGO needed)
+echo "  Building jack-plugin-sqlite3..."
+(cd plugins/core/sqlite3 && \
+    CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
+    -ldflags "-s -w" \
+    -o ../../../bin/jack-plugin-sqlite3 \
+    .)
+
+echo "✓ Plugin build complete: bin/jack-plugin-sqlite3"
+echo "  Size: $(ls -lh bin/jack-plugin-sqlite3 | awk '{print $5}')"
+
 echo ""
 echo "To deploy:"
-echo "  scp jack root@gateway:/usr/local/bin/"
+echo "  scp bin/jack root@gateway:/usr/local/bin/"
 echo "  scp bin/jack-plugin-* root@gateway:/usr/lib/jack/plugins/"

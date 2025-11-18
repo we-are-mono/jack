@@ -9,7 +9,7 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
 
-// jack-plugin-wireguard is a Jack plugin that provides WireGuard VPN functionality.
+// jack-plugin-wireguard is a Jack plugin that provides VPN functionality using WireGuard.
 // This plugin runs as a separate process and communicates with Jack via RPC.
 package main
 
@@ -25,14 +25,14 @@ func main() {
 	log.SetOutput(os.Stderr)
 	log.SetPrefix("[jack-plugin-wireguard] ")
 
-	log.Println("Starting WireGuard VPN plugin...")
+	log.Println("Starting WireGuard plugin...")
 
-	// Create the plugin adapter
-	adapter, err := NewVPNAdapter()
+	// Create the RPC provider directly
+	provider, err := NewWireGuardRPCProvider()
 	if err != nil {
-		log.Fatalf("Failed to create plugin adapter: %v", err)
+		log.Fatalf("Failed to create wireguard provider: %v", err)
 	}
 
-	// Serve the plugin using generic protocol
-	jplugin.ServePlugin(jplugin.NewPluginAdapter(adapter))
+	// Serve the plugin using RPC protocol
+	jplugin.ServePlugin(provider)
 }

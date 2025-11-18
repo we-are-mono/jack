@@ -9,8 +9,8 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
 
-// jack-plugin-dnsmasq is a Jack plugin that provides DHCP functionality using dnsmasq.
-// This plugin runs as a separate process and communicates with Jack via RPC.
+// jack-plugin-sqlite3 is a Jack plugin that provides SQLite3 database storage for logs and data.
+// It runs as a separate process and communicates with Jack via RPC.
 package main
 
 import (
@@ -23,16 +23,13 @@ import (
 func main() {
 	// Set up logging to stderr (stdout is used for RPC)
 	log.SetOutput(os.Stderr)
-	log.SetPrefix("[jack-plugin-dnsmasq] ")
+	log.SetPrefix("[jack-plugin-sqlite3] ")
 
-	log.Println("Starting dnsmasq plugin...")
+	log.Println("Starting sqlite3 plugin...")
 
-	// Create the RPC provider directly
-	provider, err := NewDnsmasqRPCProvider()
-	if err != nil {
-		log.Fatalf("Failed to create dnsmasq provider: %v", err)
-	}
+	// Create the RPC provider with CLI command support
+	provider := NewSQLite3RPCProvider()
 
-	// Serve the plugin using RPC protocol
+	// Serve the plugin using generic protocol
 	jplugin.ServePlugin(provider)
 }

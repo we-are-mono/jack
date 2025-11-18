@@ -14,25 +14,26 @@ package system
 
 import (
 	"fmt"
-	"log"
 	"net"
 
 	"github.com/vishvananda/netlink"
+	"github.com/we-are-mono/jack/daemon/logger"
 	"github.com/we-are-mono/jack/types"
 )
 
 // ApplyRoutesConfig applies static route configuration
 func ApplyRoutesConfig(config *types.RoutesConfig) error {
-	log.Println("[INFO] Applying static routes configuration")
+	logger.Info("Applying static routes configuration")
 
 	if config == nil || len(config.Routes) == 0 {
-		log.Println("[INFO] No routes to configure")
+		logger.Info("No routes to configure")
 		return nil
 	}
 
 	for routeName, route := range config.Routes {
 		if !route.Enabled {
-			log.Printf("[INFO] Route %s is disabled, skipping", routeName)
+			logger.Info("Route is disabled, skipping",
+				logger.Field{Key: "route", Value: routeName})
 			continue
 		}
 
@@ -41,12 +42,16 @@ func ApplyRoutesConfig(config *types.RoutesConfig) error {
 		}
 	}
 
-	log.Printf("[INFO] Successfully configured %d routes", len(config.Routes))
+	logger.Info("Successfully configured routes",
+		logger.Field{Key: "count", Value: len(config.Routes)})
 	return nil
 }
 
 func applyRoute(routeName string, route types.Route) error {
-	log.Printf("[INFO] Adding route: %s -> %s via %s", routeName, route.Destination, route.Gateway)
+	logger.Info("Adding route",
+		logger.Field{Key: "name", Value: routeName},
+		logger.Field{Key: "destination", Value: route.Destination},
+		logger.Field{Key: "gateway", Value: route.Gateway})
 
 	// Parse destination
 	var dst *net.IPNet
@@ -115,13 +120,16 @@ func applyRoute(routeName string, route types.Route) error {
 	// Remove existing identical route first (if it exists)
 	existingRoutes, err := netlink.RouteList(nil, netlink.FAMILY_V4)
 	if err != nil {
-		log.Printf("[WARN] Failed to list existing routes: %v", err)
+		logger.Warn("Failed to list existing routes",
+			logger.Field{Key: "error", Value: err.Error()})
 	} else {
 		for _, existing := range existingRoutes {
 			if routesMatch(existing, *nlRoute) {
-				log.Printf("[INFO] Removing existing route for %s", route.Destination)
+				logger.Info("Removing existing route",
+					logger.Field{Key: "destination", Value: route.Destination})
 				if err := netlink.RouteDel(&existing); err != nil {
-					log.Printf("[WARN] Failed to remove existing route: %v", err)
+					logger.Warn("Failed to remove existing route",
+						logger.Field{Key: "error", Value: err.Error()})
 				}
 			}
 		}
@@ -132,7 +140,11 @@ func applyRoute(routeName string, route types.Route) error {
 		return fmt.Errorf("failed to add route: %w", err)
 	}
 
-	log.Printf("[INFO] Successfully added route: %s (gw=%v, link=%d, dst=%v)", routeName, nlRoute.Gw, nlRoute.LinkIndex, nlRoute.Dst)
+	logger.Info("Successfully added route",
+		logger.Field{Key: "name", Value: routeName},
+		logger.Field{Key: "gateway", Value: nlRoute.Gw},
+		logger.Field{Key: "link_index", Value: nlRoute.LinkIndex},
+		logger.Field{Key: "destination", Value: nlRoute.Dst})
 	return nil
 }
 

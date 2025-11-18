@@ -17,6 +17,8 @@ package integration
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -257,8 +259,8 @@ func TestMultiStepTransaction(t *testing.T) {
 	require.True(t, resp.Success)
 
 	// Add routes in same transaction
-	routes := []types.Route{
-		{
+	routes := map[string]types.Route{
+		"test-route-workflow": {
 			Destination: "192.168.1.0/24",
 			Gateway:     "10.0.3.1",
 			Metric:      100,
@@ -433,6 +435,14 @@ func TestConfigurationPersistence(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, resp.Success)
 
+	// Debug: Check if interfaces.json was saved
+	interfacesPath := filepath.Join(harness.configDir, "interfaces.json")
+	if data, err := os.ReadFile(interfacesPath); err == nil {
+		t.Logf("interfaces.json after commit: %s", string(data))
+	} else {
+		t.Logf("interfaces.json not found after commit: %v", err)
+	}
+
 	_, err = harness.SendRequest(daemon.Request{Command: "apply"})
 	require.NoError(t, err)
 
@@ -458,6 +468,13 @@ func TestConfigurationPersistence(t *testing.T) {
 
 	harness.WaitForDaemon(5 * time.Second)
 
+	// Debug: Check if interfaces.json still exists after restart
+	if data, err := os.ReadFile(interfacesPath); err == nil {
+		t.Logf("interfaces.json after restart: %s", string(data))
+	} else {
+		t.Logf("interfaces.json not found after restart: %v", err)
+	}
+
 	// Get configuration to verify it was loaded from disk
 	resp, err = harness.SendRequest(daemon.Request{Command: "get"})
 	require.NoError(t, err)
@@ -467,6 +484,7 @@ func TestConfigurationPersistence(t *testing.T) {
 	// Marshal and unmarshal to get clean structure
 	dataBytes, err := json.Marshal(resp.Data)
 	require.NoError(t, err)
+	t.Logf("Response data: %s", string(dataBytes))
 
 	var config struct {
 		Interfaces map[string]types.Interface `json:"interfaces"`

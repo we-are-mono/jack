@@ -77,6 +77,11 @@ func (m *mockProvider) ExecuteCLICommand(ctx context.Context, command string, ar
 	return []byte("command output"), nil
 }
 
+func (m *mockProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
+	// Mock implementation - just return nil
+	return nil
+}
+
 // mockPluginWithMetadata implements plugins.Plugin for testing with full metadata
 type mockPluginWithMetadata struct {
 	metadata plugins.PluginMetadata
