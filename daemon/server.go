@@ -186,12 +186,17 @@ func (s *Server) registerPluginLogSubscriber(plugin plugins.Plugin, name string)
 	// Get the logger emitter
 	emitter := logger.GetEmitter()
 	if emitter == nil {
+		logger.Warn("Cannot register plugin - logger emitter is nil",
+			logger.Field{Key: "plugin", Value: name})
 		return // Logger not initialized
 	}
 
 	// Get the underlying RPC provider
 	loader, ok := plugin.(*PluginLoader)
 	if !ok {
+		logger.Warn("Cannot register plugin - not a PluginLoader",
+			logger.Field{Key: "plugin", Value: name},
+			logger.Field{Key: "type", Value: fmt.Sprintf("%T", plugin)})
 		return // Not a PluginLoader
 	}
 
@@ -312,50 +317,18 @@ func (s *Server) Start(applyOnStartup bool) error {
 			}
 		}
 
-		// Apply plugin configs (creates VPN interfaces, etc.)
-		for _, namespace := range s.registry.List() {
-			if plugin, exists := s.registry.Get(namespace); exists {
-				config, err := s.state.GetCurrent(namespace)
-				if err != nil || config == nil {
-					continue
-				}
-				if err := plugin.ApplyConfig(config); err != nil {
-					logger.Warn("Failed to apply plugin config",
-						logger.Field{Key: "plugin", Value: namespace},
-						logger.Field{Key: "error", Value: err.Error()})
-				} else {
-					logger.Info("Plugin started with config",
-						logger.Field{Key: "plugin", Value: namespace})
-				}
-			}
-		}
+		// Note: Plugin configs already applied in loadPlugins() during initialization
+		// No need to reapply them here - they're already running
 
-		// Apply routes AFTER plugins (so VPN interfaces exist)
+		// Apply routes AFTER plugins have started (so VPN interfaces exist)
 		if err := system.ApplyRoutesConfig(&routesConfig); err != nil {
 			logger.Error("Failed to apply routes",
 				logger.Field{Key: "error", Value: err.Error()})
 		}
 
 		logger.Info("Configuration applied on startup")
-	} else {
-		// If not applying on startup, still start plugins with their config
-		for _, namespace := range s.registry.List() {
-			if plugin, exists := s.registry.Get(namespace); exists {
-				config, err := s.state.GetCurrent(namespace)
-				if err != nil || config == nil {
-					continue
-				}
-				if err := plugin.ApplyConfig(config); err != nil {
-					logger.Warn("Failed to apply plugin config",
-						logger.Field{Key: "plugin", Value: namespace},
-						logger.Field{Key: "error", Value: err.Error()})
-				} else {
-					logger.Info("Plugin started with config",
-						logger.Field{Key: "plugin", Value: namespace})
-				}
-			}
-		}
 	}
+	// Note: Plugins are already initialized in loadPlugins(), no need to apply again here
 
 	logger.Info("Daemon listening", logger.Field{Key: "socket", Value: GetSocketPath()})
 
@@ -382,6 +355,10 @@ func (s *Server) Stop() error {
 	close(s.done)
 	if s.listener != nil {
 		s.listener.Close()
+	}
+	// Clean up all plugin processes
+	if s.registry != nil {
+		s.registry.CloseAll()
 	}
 	os.Remove(GetSocketPath())
 	return nil

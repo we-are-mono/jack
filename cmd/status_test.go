@@ -429,12 +429,12 @@ func TestPrintCompactStatus(t *testing.T) {
 			name: "running daemon with interfaces",
 			data: map[string]interface{}{
 				"daemon": map[string]interface{}{
-					"Running": true,
-					"PID":     float64(1234),
+					"running": true,
+					"pid":     float64(1234),
 				},
 				"system": map[string]interface{}{
-					"Hostname": "router",
-					"Uptime":   "2 days",
+					"hostname": "router",
+					"uptime":   "2 days",
 				},
 				"pending":       false,
 				"ip_forwarding": true,
@@ -464,7 +464,7 @@ func TestPrintCompactStatus(t *testing.T) {
 			name: "daemon down with pending changes",
 			data: map[string]interface{}{
 				"daemon": map[string]interface{}{
-					"Running": false,
+					"running": false,
 				},
 				"pending":       true,
 				"ip_forwarding": false,
@@ -479,8 +479,8 @@ func TestPrintCompactStatus(t *testing.T) {
 			name: "with plugins",
 			data: map[string]interface{}{
 				"daemon": map[string]interface{}{
-					"Running": true,
-					"PID":     float64(5678),
+					"running": true,
+					"pid":     float64(5678),
 				},
 				"plugins": map[string]interface{}{
 					"firewall": map[string]interface{}{
@@ -530,15 +530,15 @@ func TestPrintVerboseStatus(t *testing.T) {
 			name: "complete system status",
 			data: map[string]interface{}{
 				"daemon": map[string]interface{}{
-					"Running":    true,
-					"PID":        float64(1234),
-					"Uptime":     "1h 30m",
-					"ConfigPath": "/etc/jack",
+					"running":     true,
+					"pid":         float64(1234),
+					"uptime":      "1h 30m",
+					"config_path": "/etc/jack",
 				},
 				"system": map[string]interface{}{
-					"Hostname":      "router",
-					"KernelVersion": "5.15.0",
-					"Uptime":        "2 days",
+					"hostname":       "router",
+					"kernel_version": "5.15.0",
+					"uptime":         "2 days",
 				},
 				"pending":       true,
 				"ip_forwarding": true,
@@ -579,8 +579,8 @@ func TestPrintVerboseStatus(t *testing.T) {
 			name: "daemon inactive",
 			data: map[string]interface{}{
 				"daemon": map[string]interface{}{
-					"Running":    false,
-					"ConfigPath": "/etc/jack",
+					"running":     false,
+					"config_path": "/etc/jack",
 				},
 				"pending":       false,
 				"ip_forwarding": false,

@@ -1,9 +1,19 @@
-.PHONY: test lint lint-unused coverage coverage-unit coverage-integration coverage-merge check build clean install-tools deadcode deadcode-test clean-check test-integration
+.PHONY: test lint lint-unused coverage coverage-unit coverage-integration coverage-merge check build clean install-tools deadcode deadcode-test clean-check test-integration docker-base-image
 
 # Run all tests (unit tests only)
 test:
 	@echo "Running unit tests..."
 	go test -v -race ./...
+
+# Build cached Docker base image (only when it doesn't exist)
+docker-base-image:
+	@if ! docker image inspect jack-integration-base >/dev/null 2>&1; then \
+		echo "Building cached base image (this happens once)..."; \
+		docker build -t jack-integration-base -f Dockerfile.test . && \
+		echo "✓ Base image built and cached"; \
+	else \
+		echo "✓ Base image already exists (cached)"; \
+	fi
 
 # Minimum coverage threshold (percentage)
 # Unit tests: 35.2% | Integration tests: ~15-20% | Combined: ~50-55%
@@ -18,15 +28,25 @@ coverage-unit:
 	@go tool cover -func=coverage-unit.out | grep total || echo "No coverage data"
 
 # Run integration tests with coverage (requires Docker)
-coverage-integration:
-	@echo "==> Building test container..."
-	@docker build -t jack-integration-test -f Dockerfile.test . >/dev/null
+coverage-integration: docker-base-image
+	@echo "==> Building binaries locally..."
+	@mkdir -p bin
+	@go build -o jack
+	@cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
+	@cd plugins/core/wireguard && go build -o ../../../bin/jack-plugin-wireguard .
+	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
+	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
+	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
+	@cd plugins/core/sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
 	@echo "==> Running integration tests with coverage in container..."
 	@mkdir -p coverage-data
 	@docker run --rm --privileged --cap-add=ALL \
+		-v $(PWD):/opt/jack \
+		-v $(PWD)/bin:/usr/lib/jack/plugins \
 		-v $(PWD)/coverage-data:/coverage-data \
-		jack-integration-test \
-		sh -c 'go test -v -tags=integration -covermode=atomic -coverprofile=/coverage-data/integration.out -coverpkg=./... ./test/integration/...'
+		-w /opt/jack \
+		jack-integration-base \
+		sh -c 'go mod download && go test -v -p=1 -tags=integration -covermode=atomic -coverprofile=/coverage-data/integration.out -coverpkg=./... ./test/integration/...'
 	@cp coverage-data/integration.out coverage-integration.out
 	@echo ""
 	@echo "Integration test coverage:"
@@ -101,13 +121,24 @@ clean-check: lint deadcode coverage
 	@echo "✓ All checks passed!"
 	@echo "======================================"
 
-# Run integration tests in Docker
-test-integration:
-	@echo "Building test container..."
-	docker build -t jack-integration-test -f Dockerfile.test .
-	@echo "Running integration tests in container..."
-	docker run --rm --privileged --cap-add=ALL jack-integration-test \
-		go test -v -tags=integration -timeout=10m ./test/integration/...
+# Run integration tests in Docker (without coverage)
+test-integration: docker-base-image
+	@echo "==> Building binaries locally..."
+	@mkdir -p bin
+	@go build -o jack
+	@cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
+	@cd plugins/core/wireguard && go build -o ../../../bin/jack-plugin-wireguard .
+	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
+	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
+	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
+	@cd plugins/core/sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
+	@echo "==> Running integration tests in container..."
+	@docker run --rm --privileged --cap-add=ALL \
+		-v $(PWD):/opt/jack \
+		-v $(PWD)/bin:/usr/lib/jack/plugins \
+		-w /opt/jack \
+		jack-integration-base \
+		sh -c 'go mod download && go test -v -p=1 -tags=integration -timeout=10m ./test/integration/...'
 
 # Build binaries
 build:
@@ -133,7 +164,8 @@ clean:
 help:
 	@echo "Available targets:"
 	@echo "  test                    - Run unit tests"
-	@echo "  test-integration        - Run integration tests in Docker"
+	@echo "  test-integration        - Run integration tests in Docker (fast, cached)"
+	@echo "  docker-base-image       - Build cached Docker base image (auto-built when needed)"
 	@echo "  coverage                - Run combined unit + integration coverage (enforces $(MIN_COVERAGE)% minimum)"
 	@echo "  coverage-unit           - Run unit tests with coverage only"
 	@echo "  coverage-integration    - Run integration tests with coverage only (requires Docker)"

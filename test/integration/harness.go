@@ -164,8 +164,8 @@ func (h *TestHarness) startDaemonInternal(ctx context.Context, logWriter *bytes.
 		return fmt.Errorf("failed to create daemon server: %w", err)
 	}
 
-	// Store cancel function from parent context
-	_, cancel := context.WithCancel(ctx)
+	// Create child context for daemon control
+	daemonCtx, cancel := context.WithCancel(ctx)
 	h.daemonCancel = cancel
 
 	// Run daemon in goroutine
@@ -179,7 +179,7 @@ func (h *TestHarness) startDaemonInternal(ctx context.Context, logWriter *bytes.
 
 	// Monitor context cancellation
 	go func() {
-		<-ctx.Done()
+		<-daemonCtx.Done()
 		srv.Stop()
 	}()
 

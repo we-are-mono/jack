@@ -33,15 +33,29 @@ jobs:
 
     - name: Run integration tests with coverage
       run: |
-        # Build test container
-        docker build -t jack-integration-test -f Dockerfile.test .
+        # Build cached base image (OS + Go dependencies)
+        docker build -t jack-integration-base -f Dockerfile.test .
 
-        # Run integration tests with coverage
+        # Build binaries locally
+        mkdir -p bin
+        go build -o jack
+        cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
+        cd ../wireguard && go build -o ../../../bin/jack-plugin-wireguard .
+        cd ../dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
+        cd ../monitoring && go build -o ../../../bin/jack-plugin-monitoring .
+        cd ../leds && go build -o ../../../bin/jack-plugin-leds .
+        cd ../sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
+        cd ../../..
+
+        # Run integration tests with coverage (mount code and binaries)
         mkdir -p coverage-data
         docker run --rm --privileged --cap-add=ALL \
+          -v $(pwd):/opt/jack \
+          -v $(pwd)/bin:/usr/lib/jack/plugins \
           -v $(pwd)/coverage-data:/coverage-data \
-          jack-integration-test \
-          sh -c 'go test -v -tags=integration -covermode=atomic -coverprofile=/coverage-data/integration.out -coverpkg=./... ./test/integration/...'
+          -w /opt/jack \
+          jack-integration-base \
+          sh -c 'go mod download && go test -v -p=1 -tags=integration -covermode=atomic -coverprofile=/coverage-data/integration.out -coverpkg=./... ./test/integration/...'
 
         # Copy integration coverage file
         cp coverage-data/integration.out coverage-integration.out

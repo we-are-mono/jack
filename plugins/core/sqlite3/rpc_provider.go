@@ -24,6 +24,7 @@ import (
 // SQLite3RPCProvider implements the Provider interface with CLI command support
 type SQLite3RPCProvider struct {
 	provider *DatabaseProvider
+	lastPath string // Track database path to detect when it changes
 }
 
 // NewSQLite3RPCProvider creates a new RPC provider for sqlite3
@@ -66,20 +67,32 @@ func (p *SQLite3RPCProvider) ApplyConfig(ctx context.Context, configJSON []byte)
 		return err
 	}
 
-	// Close existing provider FIRST to release database lock
-	// This prevents "database is locked" errors when reapplying config
-	if p.provider != nil {
+	// If database is not open yet, open it
+	if p.provider == nil {
+		provider, err := NewDatabaseProvider(&config)
+		if err != nil {
+			return fmt.Errorf("failed to create database provider: %w", err)
+		}
+		p.provider = provider
+		p.lastPath = config.DatabasePath
+		return nil
+	}
+
+	// If database path changed, we need to close old and open new
+	if config.DatabasePath != p.lastPath {
 		p.provider.Close()
-		p.provider = nil
+		provider, err := NewDatabaseProvider(&config)
+		if err != nil {
+			return fmt.Errorf("failed to create database provider: %w", err)
+		}
+		p.provider = provider
+		p.lastPath = config.DatabasePath
+		return nil
 	}
 
-	// Now create new provider with fresh connection
-	provider, err := NewDatabaseProvider(&config)
-	if err != nil {
-		return fmt.Errorf("failed to create database provider: %w", err)
-	}
-
-	p.provider = provider
+	// Database is already open with same path - keep it open
+	// Just update any runtime config (like max_log_entries) if needed
+	// For now, we don't have any runtime-updatable config, so just return
 	return nil
 }
 
