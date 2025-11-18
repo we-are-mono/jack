@@ -1,5 +1,8 @@
 # Jack - Network Configuration Daemon
 
+[![Tests](https://github.com/we-are-mono/jack/actions/workflows/test.yml/badge.svg)](https://github.com/we-are-mono/jack/actions/workflows/test.yml)
+[![codecov](https://codecov.io/gh/we-are-mono/jack/branch/master/graph/badge.svg)](https://codecov.io/gh/we-are-mono/jack)
+
 Jack is a modern, transactional network configuration daemon for Linux systems. It provides a clean abstraction layer over Linux networking, firewalls, and services, making it easy to configure routers, gateways, and network appliances.
 
 ## ⚠️ Experimental Software Warning
