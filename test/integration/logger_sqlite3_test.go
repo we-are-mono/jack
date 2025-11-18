@@ -27,7 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/we-are-mono/jack/daemon"
 
-	_ "github.com/mattn/go-sqlite3" // SQLite3 driver
+	_ "modernc.org/sqlite" // Pure-Go SQLite driver
 )
 
 // TestLoggerSQLite3BasicIntegration verifies that the logger emits events to the sqlite3 plugin
@@ -112,7 +112,7 @@ func TestLoggerSQLite3BasicIntegration(t *testing.T) {
 	assert.FileExists(t, dbPath, "Database file should be created")
 
 	// Open database and verify logs were stored
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
 	defer db.Close()
 
@@ -336,7 +336,7 @@ func TestStructuredLoggingFields(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	// Query database to find logs with structured fields
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := sql.Open("sqlite", dbPath)
 	require.NoError(t, err)
 	defer db.Close()
 

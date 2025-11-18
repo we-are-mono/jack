@@ -6,7 +6,6 @@ require (
 	github.com/guptarohit/asciigraph v0.7.3
 	github.com/hashicorp/go-hclog v1.6.3
 	github.com/hashicorp/go-plugin v1.7.0
-	github.com/mattn/go-sqlite3 v1.14.32
 	github.com/spf13/cobra v1.10.1
 	github.com/stretchr/testify v1.11.1
 	github.com/vishvananda/netlink v1.3.1

@@ -2,62 +2,75 @@
 
 export DH_VERBOSE = 1
 export GOOS = linux
-export GOARCH = arm64
 export CGO_ENABLED = 0
+
+# GOARCH is set via DEB_HOST_ARCH_CPU (amd64 -> amd64, arm64 -> arm64)
+# This allows dpkg-buildpackage to properly set architecture
+ifeq ($(DEB_HOST_ARCH),arm64)
+    export GOARCH = arm64
+else ifeq ($(DEB_HOST_ARCH),amd64)
+    export GOARCH = amd64
+else
+    # Fallback: try to detect from DEB_HOST_GNU_CPU
+    ifeq ($(DEB_HOST_GNU_CPU),x86_64)
+        export GOARCH = amd64
+    else ifeq ($(DEB_HOST_GNU_CPU),aarch64)
+        export GOARCH = arm64
+    else
+        # Final fallback to native architecture
+        export GOARCH = $(shell go env GOARCH)
+    endif
+endif
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.1.0")
 BUILD_TIME := $(shell date -u '+%Y-%m-%d_%H:%M:%S')
 
+# Auto-discover all plugins in plugins/core/
+PLUGIN_DIRS := $(wildcard plugins/core/*)
+PLUGIN_NAMES := $(notdir $(PLUGIN_DIRS))
+PLUGIN_BINARIES := $(addprefix jack-plugin-,$(PLUGIN_NAMES))
+
 %:
-	dh $@
+	dh $@ --without=systemd
 
 override_dh_auto_build:
+	@echo "Building for GOOS=$(GOOS) GOARCH=$(GOARCH)"
+	@echo "Version: $(VERSION)"
+	@echo "Build Time: $(BUILD_TIME)"
+	@echo "Plugins to build: $(PLUGIN_NAMES)"
+	@echo ""
+
 	# Build jack main binary
 	go build \
 		-ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME)" \
 		-o jack \
 		.
 
-	# Build nftables plugin
-	cd plugins/core/nftables && \
-		go build \
-			-ldflags "-s -w" \
-			-o ../../../jack-plugin-nftables \
-			.
-
-	# Build dnsmasq plugin
-	cd plugins/core/dnsmasq && \
-		go build \
-			-ldflags "-s -w" \
-			-o ../../../jack-plugin-dnsmasq \
-			.
-
-	# Build wireguard plugin
-	cd plugins/core/wireguard && \
-		go build \
-			-ldflags "-s -w" \
-			-o ../../../jack-plugin-wireguard \
-			.
-
-	# Build monitoring plugin
-	cd plugins/core/monitoring && \
-		go build \
-			-ldflags "-s -w" \
-			-o ../../../jack-plugin-monitoring \
-			.
+	# Build all plugins dynamically
+	@for plugin_dir in $(PLUGIN_DIRS); do \
+		plugin_name=$$(basename $$plugin_dir); \
+		plugin_binary="jack-plugin-$$plugin_name"; \
+		echo "Building $$plugin_binary..."; \
+		cd $$plugin_dir && \
+			go build \
+				-ldflags "-s -w" \
+				-o ../../../$$plugin_binary \
+				.; \
+		cd -; \
+	done
 
 override_dh_auto_install:
 	# Install main binary
-	install -D -m 0755 jack $(CURDIR)/debian/jack/usr/local/bin/jack
+	install -D -m 0755 jack $(CURDIR)/debian/jack/usr/bin/jack
 
-	# Install plugins
-	install -D -m 0755 jack-plugin-nftables $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-nftables
-	install -D -m 0755 jack-plugin-dnsmasq $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-dnsmasq
-	install -D -m 0755 jack-plugin-wireguard $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-wireguard
-	install -D -m 0755 jack-plugin-monitoring $(CURDIR)/debian/jack/usr/lib/jack/plugins/jack-plugin-monitoring
+	# Install all plugins dynamically
+	@for plugin_binary in $(PLUGIN_BINARIES); do \
+		echo "Installing $$plugin_binary..."; \
+		install -D -m 0755 $$plugin_binary $(CURDIR)/debian/jack/usr/lib/jack/plugins/$$plugin_binary; \
+	done
 
-	# Install systemd service
-	install -D -m 0644 debian/jack.service $(CURDIR)/debian/jack/lib/systemd/system/jack.service
+	# Install systemd service (use /usr/lib for merged-/usr systems)
+	install -D -m 0644 debian/jack.service $(CURDIR)/debian/jack/usr/lib/systemd/system/jack.service
 
 	# Create config directory
 	install -d -m 0755 $(CURDIR)/debian/jack/etc/jack
@@ -72,8 +85,12 @@ override_dh_auto_install:
 	install -D -m 0644 examples/config/interfaces.json $(CURDIR)/debian/jack/etc/jack/templates/interfaces.json
 
 override_dh_auto_clean:
-	rm -f jack jack-plugin-nftables jack-plugin-dnsmasq jack-plugin-wireguard jack-plugin-monitoring
+	rm -f jack $(PLUGIN_BINARIES)
 	dh_auto_clean
 
 override_dh_auto_test:
-	# Skip tests for now
+	# Skip tests during package build
+	# Tests are run separately in CI
+
+override_dh_strip:
+	# Skip strip when cross-compiling (binaries are already stripped via -ldflags "-s -w")

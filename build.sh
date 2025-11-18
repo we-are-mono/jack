@@ -1,19 +1,23 @@
 #!/bin/bash
 set -e
 
+# Default to arm64, but allow override via environment or parameter
+GOARCH=${GOARCH:-${1:-arm64}}
+GOOS=${GOOS:-linux}
+
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
 BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
-
-GOOS=linux
-GOARCH=arm64
 
 echo "Building Jack for ${GOOS}/${GOARCH}..."
 echo "Version: ${VERSION}"
 echo "Build Time: ${BUILD_TIME}"
+echo ""
 
 # Create bin directory for all binaries
 mkdir -p bin
 
+# Build main daemon
+echo "Building main daemon..."
 CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
     -ldflags "-s -w -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME}" \
     -o bin/jack \
@@ -22,77 +26,51 @@ CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
 echo "✓ Build complete: bin/jack"
 echo "  Size: $(ls -lh bin/jack | awk '{print $5}')"
 
-# Build plugins
+# Auto-discover and build all plugins in plugins/core/
 echo ""
-echo "Building plugins..."
+echo "Auto-discovering plugins in plugins/core/..."
 
-# Build nftables plugin
-echo "  Building jack-plugin-nftables..."
-(cd plugins/core/nftables && \
-    CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
-    -ldflags "-s -w" \
-    -o ../../../bin/jack-plugin-nftables \
-    .)
+PLUGIN_COUNT=0
+for plugin_dir in plugins/core/*/; do
+    if [ ! -d "$plugin_dir" ]; then
+        continue
+    fi
 
-echo "✓ Plugin build complete: bin/jack-plugin-nftables"
-echo "  Size: $(ls -lh bin/jack-plugin-nftables | awk '{print $5}')"
+    plugin_name=$(basename "$plugin_dir")
+    plugin_binary="jack-plugin-${plugin_name}"
 
-# Build dnsmasq plugin
-echo "  Building jack-plugin-dnsmasq..."
-(cd plugins/core/dnsmasq && \
-    CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
-    -ldflags "-s -w" \
-    -o ../../../bin/jack-plugin-dnsmasq \
-    .)
+    echo ""
+    echo "  Building ${plugin_binary}..."
 
-echo "✓ Plugin build complete: bin/jack-plugin-dnsmasq"
-echo "  Size: $(ls -lh bin/jack-plugin-dnsmasq | awk '{print $5}')"
+    (cd "$plugin_dir" && \
+        CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
+        -ldflags "-s -w" \
+        -o "../../../bin/${plugin_binary}" \
+        .)
 
-# Build wireguard plugin
-echo "  Building jack-plugin-wireguard..."
-(cd plugins/core/wireguard && \
-    CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
-    -ldflags "-s -w" \
-    -o ../../../bin/jack-plugin-wireguard \
-    .)
+    echo "  ✓ Plugin build complete: bin/${plugin_binary}"
+    echo "    Size: $(ls -lh "bin/${plugin_binary}" | awk '{print $5}')"
 
-echo "✓ Plugin build complete: bin/jack-plugin-wireguard"
-echo "  Size: $(ls -lh bin/jack-plugin-wireguard | awk '{print $5}')"
-
-# Build monitoring plugin
-echo "  Building jack-plugin-monitoring..."
-(cd plugins/core/monitoring && \
-    CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
-    -ldflags "-s -w" \
-    -o ../../../bin/jack-plugin-monitoring \
-    .)
-
-echo "✓ Plugin build complete: bin/jack-plugin-monitoring"
-echo "  Size: $(ls -lh bin/jack-plugin-monitoring | awk '{print $5}')"
-
-# Build LED plugin
-echo "  Building jack-plugin-leds..."
-(cd plugins/core/leds && \
-    CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
-    -ldflags "-s -w" \
-    -o ../../../bin/jack-plugin-leds \
-    .)
-
-echo "✓ Plugin build complete: bin/jack-plugin-leds"
-echo "  Size: $(ls -lh bin/jack-plugin-leds | awk '{print $5}')"
-
-# Build SQLite3 plugin (uses pure-Go driver, no CGO needed)
-echo "  Building jack-plugin-sqlite3..."
-(cd plugins/core/sqlite3 && \
-    CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build \
-    -ldflags "-s -w" \
-    -o ../../../bin/jack-plugin-sqlite3 \
-    .)
-
-echo "✓ Plugin build complete: bin/jack-plugin-sqlite3"
-echo "  Size: $(ls -lh bin/jack-plugin-sqlite3 | awk '{print $5}')"
+    PLUGIN_COUNT=$((PLUGIN_COUNT + 1))
+done
 
 echo ""
-echo "To deploy:"
+echo "════════════════════════════════════════════════════════"
+echo "Build Summary"
+echo "════════════════════════════════════════════════════════"
+echo "  Platform: ${GOOS}/${GOARCH}"
+echo "  Version: ${VERSION}"
+echo "  Main daemon: bin/jack"
+echo "  Plugins built: ${PLUGIN_COUNT}"
+echo ""
+echo "Total binaries:"
+ls -lh bin/ | tail -n +2
+
+echo ""
+echo "To deploy manually:"
 echo "  scp bin/jack root@gateway:/usr/local/bin/"
 echo "  scp bin/jack-plugin-* root@gateway:/usr/lib/jack/plugins/"
+echo ""
+echo "Or use deployment scripts:"
+echo "  ./deploy.sh <gateway-ip>         # Quick deployment"
+echo "  ./deploy.sh <gateway-ip> deb     # Build and install .deb package"

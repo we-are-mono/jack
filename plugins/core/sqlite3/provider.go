@@ -53,11 +53,16 @@ func (p *DatabaseProvider) connect() error {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open database connection
-	db, err := sql.Open("sqlite", p.config.DatabasePath)
+	// Open database connection with WAL mode and busy timeout
+	// WAL mode allows concurrent readers and writers
+	dsn := p.config.DatabasePath + "?_journal_mode=WAL&_busy_timeout=5000&_txlock=immediate"
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
+
+	// Set connection pool limits to prevent lock contention
+	db.SetMaxOpenConns(1)
 
 	// Test connection
 	if err := db.Ping(); err != nil {

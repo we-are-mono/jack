@@ -73,8 +73,8 @@ func printCompactStatus(data interface{}) {
 
 	// Daemon status
 	if daemonData, ok := dataMap["daemon"].(map[string]interface{}); ok {
-		if running, ok := daemonData["Running"].(bool); ok && running {
-			fmt.Printf("[OK] Daemon:     Running (PID: %v)\n", daemonData["PID"])
+		if running, ok := daemonData["running"].(bool); ok && running {
+			fmt.Printf("[OK] Daemon:     Running (PID: %v)\n", daemonData["pid"])
 		} else {
 			fmt.Println("[DOWN] Daemon:   Not running")
 		}
@@ -82,8 +82,8 @@ func printCompactStatus(data interface{}) {
 
 	// System info
 	if sysData, ok := dataMap["system"].(map[string]interface{}); ok {
-		fmt.Printf("  Hostname:   %v\n", sysData["Hostname"])
-		fmt.Printf("  Uptime:     %v\n", sysData["Uptime"])
+		fmt.Printf("  Hostname:   %v\n", sysData["hostname"])
+		fmt.Printf("  Uptime:     %v\n", sysData["uptime"])
 	}
 
 	fmt.Println()
@@ -163,15 +163,15 @@ func printVerboseStatus(data interface{}) {
 	fmt.Println("DAEMON")
 	fmt.Println("------")
 	if daemonData, ok := dataMap["daemon"].(map[string]interface{}); ok {
-		running, _ := daemonData["Running"].(bool) //nolint:errcheck // Default to false if not present
+		running, _ := daemonData["running"].(bool) //nolint:errcheck // Default to false if not present
 		fmt.Printf("Status:      %s\n", boolToStatus(running))
 		if running {
-			fmt.Printf("PID:         %v\n", daemonData["PID"])
-			if uptime, ok := daemonData["Uptime"].(string); ok && uptime != "" {
+			fmt.Printf("PID:         %v\n", daemonData["pid"])
+			if uptime, ok := daemonData["uptime"].(string); ok && uptime != "" {
 				fmt.Printf("Uptime:      %s\n", uptime)
 			}
 		}
-		fmt.Printf("Config Path: %v\n", daemonData["ConfigPath"])
+		fmt.Printf("Config Path: %v\n", daemonData["config_path"])
 	}
 	fmt.Println()
 
@@ -179,9 +179,9 @@ func printVerboseStatus(data interface{}) {
 	fmt.Println("SYSTEM")
 	fmt.Println("------")
 	if sysData, ok := dataMap["system"].(map[string]interface{}); ok {
-		fmt.Printf("Hostname:       %v\n", sysData["Hostname"])
-		fmt.Printf("Kernel:         %v\n", sysData["KernelVersion"])
-		fmt.Printf("System Uptime:  %v\n", sysData["Uptime"])
+		fmt.Printf("Hostname:       %v\n", sysData["hostname"])
+		fmt.Printf("Kernel:         %v\n", sysData["kernel_version"])
+		fmt.Printf("System Uptime:  %v\n", sysData["uptime"])
 	}
 	fmt.Println()
 

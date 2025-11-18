@@ -7,7 +7,7 @@ Standards-Version: 4.5.0
 Homepage: https://github.com/we-are-mono/jack
 
 Package: jack
-Architecture: arm64
+Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}, systemd
 Recommends: dnsmasq (>= 2.80), nftables (>= 0.9), wireguard-tools
 Description: Network gateway management tool
@@ -16,10 +16,13 @@ Description: Network gateway management tool
  configurations through a plugin-based architecture.
  .
  Features:
-  - Plugin-based architecture with core plugins (nftables, dnsmasq, wireguard, monitoring)
+  - Plugin-based architecture with 6 core plugins (nftables, dnsmasq, wireguard,
+    monitoring, leds, sqlite3)
   - Firewall management with nftables (zones, forwarding, NAT, port forwarding)
   - DHCP and DNS server configuration via dnsmasq
   - WireGuard VPN server and client support
+  - LED control for hardware indicators
+  - SQLite3 logging and data storage
   - Static route management with metric-based priority
   - Network interface configuration (bridges, VLANs)
   - System monitoring and health checks

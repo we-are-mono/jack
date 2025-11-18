@@ -404,6 +404,34 @@ When designing a plugin with default config:
 - Use the TodoWrite tool to track multi-step tasks
 - Let completed work speak for itself
 
+### Issue Resolution Priority
+
+**CRITICAL: Any discovered issues must be resolved immediately, regardless of whether they are related to the current activity.**
+
+When you discover bugs, inconsistencies, or problems during development:
+
+1. **Stop and fix immediately** - Don't defer or ignore issues
+2. **Fix the root cause** - Address the underlying problem, not just symptoms
+3. **Test the fix** - Verify the issue is actually resolved
+4. **Document if needed** - Update comments or documentation if the issue revealed confusion
+
+**Examples of issues to fix immediately:**
+- Misleading status messages (e.g., "[DOWN] Daemon: Not running" when daemon is actually running)
+- Database locks preventing operations
+- Incorrect error handling
+- Race conditions or timing issues
+- Configuration inconsistencies
+- Security vulnerabilities
+
+**Rationale:**
+- Technical debt compounds quickly if ignored
+- Fresh context makes fixes faster and more accurate
+- Issues discovered are often symptoms of larger problems
+- Deferring fixes leads to forgotten bugs
+- User experience suffers from accumulated minor issues
+
+**Exception:** Only defer a fix if it requires major architectural changes that would derail critical work. In this case, document the issue clearly and notify the user.
+
 ### Git Workflow
 
 **IMPORTANT: Claude should NEVER create git commits.** All git commits must be done manually by the user.

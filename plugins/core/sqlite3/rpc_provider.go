@@ -66,16 +66,17 @@ func (p *SQLite3RPCProvider) ApplyConfig(ctx context.Context, configJSON []byte)
 		return err
 	}
 
-	// Create new provider first before closing old one
-	// This ensures we don't leave p.provider pointing to a closed database
+	// Close existing provider FIRST to release database lock
+	// This prevents "database is locked" errors when reapplying config
+	if p.provider != nil {
+		p.provider.Close()
+		p.provider = nil
+	}
+
+	// Now create new provider with fresh connection
 	provider, err := NewDatabaseProvider(&config)
 	if err != nil {
 		return fmt.Errorf("failed to create database provider: %w", err)
-	}
-
-	// Close existing provider only after new one is created successfully
-	if p.provider != nil {
-		p.provider.Close()
 	}
 
 	p.provider = provider

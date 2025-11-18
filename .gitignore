@@ -30,6 +30,13 @@ debian/tmp/
 *.changes
 *.upload
 
+# Release artifacts (uploaded to GitHub Releases, not committed)
+release/
+*.tar.gz
+*.tar.gz.asc
+SHA256SUMS
+SHA256SUMS.asc
+
 # IDE and editor files
 .vscode/
 .idea/
