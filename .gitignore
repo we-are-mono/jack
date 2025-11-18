@@ -8,6 +8,7 @@ bin/
 
 # Go build artifacts
 *.test
+!Dockerfile.test  # Exception: Docker test image is tracked
 *.out
 *.prof
 coverage.txt

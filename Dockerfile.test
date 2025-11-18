@@ -1,0 +1,24 @@
+# Base image for integration testing (Go + system dependencies)
+# Uses official golang image based on Debian Trixie
+# Build once with: docker build -t jack-integration-base -f Dockerfile.test .
+FROM golang:1.24-trixie
+
+# Install required system packages for integration tests
+RUN apt-get update && apt-get install -y \
+    nftables \
+    dnsmasq \
+    wireguard-tools \
+    iproute2 \
+    iptables \
+    net-tools \
+    iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /opt/jack
+
+# Create plugin directory (will be populated by mounts)
+RUN mkdir -p /usr/lib/jack/plugins
+
+# Create coverage directory
+RUN mkdir -p /coverage-data
