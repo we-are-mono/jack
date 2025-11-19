@@ -153,8 +153,8 @@ func TestNewDatabaseProvider_SchemaInitialization(t *testing.T) {
 }
 
 func TestNewDatabaseProvider_InvalidPath(t *testing.T) {
-	// Try to create database in non-existent directory without permissions
-	invalidPath := "/root/nonexistent/dir/test.db"
+	// Try to create database in read-only filesystem (fails even for root)
+	invalidPath := "/proc/test.db"
 
 	config := &DatabaseConfig{
 		Enabled:           true,

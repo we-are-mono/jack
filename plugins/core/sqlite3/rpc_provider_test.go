@@ -88,7 +88,7 @@ func TestApplyConfig_InvalidJSON(t *testing.T) {
 func TestApplyConfig_InvalidDatabasePath(t *testing.T) {
 	config := DatabaseConfig{
 		Enabled:           true,
-		DatabasePath:      "/root/nonexistent/deep/dir/test.db",
+		DatabasePath:      "/proc/test.db", // Read-only filesystem, fails even for root
 		LogStorageEnabled: true,
 		MaxLogEntries:     100,
 	}
