@@ -432,6 +432,69 @@ When you discover bugs, inconsistencies, or problems during development:
 
 **Exception:** Only defer a fix if it requires major architectural changes that would derail critical work. In this case, document the issue clearly and notify the user.
 
+### Concurrency and Timing
+
+**CRITICAL: Never use time.Sleep() or any kind of waiting/polling mechanisms in production code.**
+
+Go provides proper concurrency primitives for synchronization and coordination. Always use these instead of sleep-based timing:
+
+**What NOT to do:**
+- `time.Sleep()` to wait for operations to complete
+- Polling loops checking for state changes
+- Fixed delays to "give things time to happen"
+- Arbitrary timeouts to work around race conditions
+
+**What to do instead:**
+- **Channels** - Use channels to signal completion, readiness, or state changes
+- **sync.WaitGroup** - Wait for multiple goroutines to complete
+- **context.Context** - Handle cancellation and timeouts properly
+- **Blocking calls** - Use blocking operations that wait for actual completion (e.g., `Dial()`, `Accept()`)
+- **Defer** - Use defer for cleanup that must happen after a function completes
+- **Callbacks/Observers** - Use event-driven patterns for notifications
+- **Mutexes** - Protect shared state with proper locking
+
+**Example patterns:**
+
+```go
+// ❌ BAD: Sleep-based waiting
+go startServer()
+time.Sleep(100 * time.Millisecond)
+connectToServer()
+
+// ✅ GOOD: Channel-based signaling
+ready := make(chan struct{})
+go func() {
+    startServer()
+    close(ready)
+}()
+<-ready
+connectToServer()
+
+// ❌ BAD: Polling for state
+for !isReady() {
+    time.Sleep(10 * time.Millisecond)
+}
+
+// ✅ GOOD: Blocking until ready
+<-readyChannel
+
+// ❌ BAD: Sleep between goroutine start and connection
+go Accept(conn)
+time.Sleep(50 * time.Millisecond)
+Dial(conn)
+
+// ✅ GOOD: Blocking Dial waits for Accept
+go Accept(conn)
+Dial(conn)  // Blocks until Accept is ready
+```
+
+**Rationale:**
+- Sleep-based timing is inherently unreliable and non-deterministic
+- Creates race conditions that may pass tests but fail in production
+- Makes code slower (always waits full duration even if operation completes quickly)
+- Hides the real synchronization requirements
+- Proper Go concurrency patterns are faster, safer, and more maintainable
+
 ### Git Workflow
 
 **IMPORTANT: Claude should NEVER create git commits.** All git commits must be done manually by the user.
@@ -718,6 +781,20 @@ sg docker -c "make test-integration"
 ```
 
 If integration tests fail, the work is NOT complete. Period.
+
+**CRITICAL RULE: NEVER ignore failing tests, even if unrelated to current work.**
+
+If tests are failing during development:
+1. **Fix the test immediately** - Even if it's "unrelated" to your current task
+2. **Never report success with failing tests** - Work is not complete until ALL tests pass
+3. **Investigate the root cause** - Failing tests indicate real problems that compound over time
+4. **Do not defer fixes** - "I'll fix it later" leads to accumulated technical debt
+
+**Examples:**
+- ❌ BAD: "The plugin works, but there's an unrelated daemon test failing - I'll report success anyway"
+- ✅ GOOD: "The plugin works, but I found a daemon test failing. Let me fix that first before reporting completion"
+
+The only exception is if the fix requires major architectural changes that would derail critical work. In this case, document the issue clearly and notify the user immediately.
 
 **CRITICAL RULE: Never use `t.Skip()` in tests.**
 

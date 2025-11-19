@@ -48,6 +48,13 @@ func (p *SQLite3RPCProvider) Metadata(ctx context.Context) (plugins.MetadataResp
 			"log_storage_enabled": true,
 			"max_log_entries":     100000,
 		},
+		ProvidedServices: []plugins.ServiceDescriptor{
+			{
+				Name:        "database",
+				Description: "SQLite3 database operations for logging and storage",
+				Methods:     []string{"InsertLog", "QueryLogs", "Stats", "Vacuum", "Exec", "Query", "QueryRow"},
+			},
+		},
 		CLICommands: []plugins.CLICommand{
 			{
 				Name:        "sqlite3",
@@ -302,4 +309,176 @@ func (p *SQLite3RPCProvider) OnLogEvent(ctx context.Context, logEventJSON []byte
 
 	// Store in database
 	return p.provider.InsertLog(timestamp, level, component, message, string(fields))
+}
+
+// GetProvidedServices returns the list of services this plugin provides
+func (p *SQLite3RPCProvider) GetProvidedServices(ctx context.Context) ([]plugins.ServiceDescriptor, error) {
+	return []plugins.ServiceDescriptor{
+		{
+			Name:        "database",
+			Description: "SQLite3 database operations for logging and storage",
+			Methods:     []string{"InsertLog", "QueryLogs", "Stats", "Vacuum", "Exec", "Query", "QueryRow"},
+		},
+	}, nil
+}
+
+// CallService handles service method calls from other plugins
+func (p *SQLite3RPCProvider) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
+	if serviceName != "database" {
+		return nil, fmt.Errorf("unknown service: %s", serviceName)
+	}
+
+	if p.provider == nil {
+		return nil, fmt.Errorf("database not initialized")
+	}
+
+	switch method {
+	case "InsertLog":
+		return p.handleInsertLog(ctx, argsJSON)
+	case "QueryLogs":
+		return p.handleQueryLogs(ctx, argsJSON)
+	case "Stats":
+		return p.handleStats(ctx)
+	case "Vacuum":
+		return p.handleVacuum(ctx)
+	case "Exec":
+		return p.handleExec(ctx, argsJSON)
+	case "Query":
+		return p.handleQuery(ctx, argsJSON)
+	case "QueryRow":
+		return p.handleQueryRow(ctx, argsJSON)
+	default:
+		return nil, fmt.Errorf("unknown method: %s", method)
+	}
+}
+
+// handleInsertLog handles InsertLog service calls
+func (p *SQLite3RPCProvider) handleInsertLog(ctx context.Context, argsJSON []byte) ([]byte, error) {
+	var args struct {
+		Timestamp string `json:"timestamp"`
+		Level     string `json:"level"`
+		Component string `json:"component"`
+		Message   string `json:"message"`
+		Fields    string `json:"fields"`
+	}
+
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal arguments: %w", err)
+	}
+
+	if err := p.provider.InsertLog(args.Timestamp, args.Level, args.Component, args.Message, args.Fields); err != nil {
+		return nil, err
+	}
+
+	// Return success response
+	return json.Marshal(map[string]interface{}{"success": true})
+}
+
+// handleQueryLogs handles QueryLogs service calls
+func (p *SQLite3RPCProvider) handleQueryLogs(ctx context.Context, argsJSON []byte) ([]byte, error) {
+	var args struct {
+		Level     string `json:"level"`
+		Component string `json:"component"`
+		Limit     int    `json:"limit"`
+	}
+
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal arguments: %w", err)
+	}
+
+	entries, err := p.provider.QueryLogs(args.Level, args.Component, args.Limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(entries)
+}
+
+// handleStats handles Stats service calls
+func (p *SQLite3RPCProvider) handleStats(ctx context.Context) ([]byte, error) {
+	stats, err := p.provider.Stats()
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(stats)
+}
+
+// handleVacuum handles Vacuum service calls
+func (p *SQLite3RPCProvider) handleVacuum(ctx context.Context) ([]byte, error) {
+	if err := p.provider.Vacuum(); err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(map[string]interface{}{"success": true})
+}
+
+// handleExec handles Exec service calls for arbitrary SQL execution
+func (p *SQLite3RPCProvider) handleExec(ctx context.Context, argsJSON []byte) ([]byte, error) {
+	var args struct {
+		Query string        `json:"query"`
+		Args  []interface{} `json:"args"`
+	}
+
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal arguments: %w", err)
+	}
+
+	rowsAffected, err := p.provider.Exec(args.Query, args.Args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(map[string]interface{}{
+		"rows_affected": rowsAffected,
+	})
+}
+
+// handleQuery handles Query service calls for SELECT queries returning multiple rows
+func (p *SQLite3RPCProvider) handleQuery(ctx context.Context, argsJSON []byte) ([]byte, error) {
+	var args struct {
+		Query string        `json:"query"`
+		Args  []interface{} `json:"args"`
+	}
+
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal arguments: %w", err)
+	}
+
+	columns, rows, err := p.provider.Query(args.Query, args.Args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(map[string]interface{}{
+		"columns": columns,
+		"rows":    rows,
+	})
+}
+
+// handleQueryRow handles QueryRow service calls for SELECT queries returning a single row
+func (p *SQLite3RPCProvider) handleQueryRow(ctx context.Context, argsJSON []byte) ([]byte, error) {
+	var args struct {
+		Query string        `json:"query"`
+		Args  []interface{} `json:"args"`
+	}
+
+	if err := json.Unmarshal(argsJSON, &args); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal arguments: %w", err)
+	}
+
+	columns, values, err := p.provider.QueryRow(args.Query, args.Args...)
+	if err != nil {
+		return nil, err
+	}
+
+	return json.Marshal(map[string]interface{}{
+		"columns": columns,
+		"values":  values,
+	})
+}
+
+// SetDaemonService stores daemon service reference (not used by this plugin)
+func (p *SQLite3RPCProvider) SetDaemonService(daemon plugins.DaemonService) {
+	// Not used by this plugin
 }

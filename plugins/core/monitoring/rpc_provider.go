@@ -302,3 +302,18 @@ func formatBandwidth(bytesPerSec uint64) string {
 	}
 	return fmt.Sprintf("%.2f %ciB/s", float64(bytesPerSec)/float64(div), "KMGTPE"[exp])
 }
+
+// GetProvidedServices returns the list of services this plugin provides (none)
+func (p *MonitoringRPCProvider) GetProvidedServices(ctx context.Context) ([]plugins.ServiceDescriptor, error) {
+	return nil, nil
+}
+
+// CallService is not implemented as this plugin doesn't provide services
+func (p *MonitoringRPCProvider) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
+	return nil, fmt.Errorf("plugin does not provide any services")
+}
+
+// SetDaemonService stores daemon service reference (not used by this plugin)
+func (p *MonitoringRPCProvider) SetDaemonService(daemon plugins.DaemonService) {
+	// Not used by this plugin
+}

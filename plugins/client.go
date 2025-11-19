@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/rpc"
 	"os"
 	"os/exec"
 
@@ -93,6 +94,61 @@ func (c *PluginClient) Dispense() (Provider, error) {
 	}
 
 	return provider, nil
+}
+
+// SetupDaemonService provides a daemon service to the plugin for bidirectional RPC
+// This allows the plugin to call services on other plugins through the daemon
+func (c *PluginClient) SetupDaemonService(daemonService DaemonService) error {
+	// Get the RPC client (which has the broker)
+	raw, err := c.rpcClient.Dispense("generic")
+	if err != nil {
+		return fmt.Errorf("failed to get plugin provider: %w", err)
+	}
+
+	rpcClient, ok := raw.(*RPCClient)
+	if !ok {
+		return fmt.Errorf("provider is not an RPCClient")
+	}
+
+	// Use a fixed broker ID for daemon service
+	daemonServiceID := uint32(1)
+
+	// Call SetDaemonService on the plugin - it will start Accept in a goroutine
+	var reply SetDaemonServiceReply
+	err = rpcClient.client.Call("Plugin.SetDaemonService", &SetDaemonServiceArgs{
+		DaemonServiceID: daemonServiceID,
+	}, &reply)
+	if err != nil {
+		return fmt.Errorf("failed to call SetDaemonService: %w", err)
+	}
+	if reply.Error != "" {
+		return fmt.Errorf("SetDaemonService failed: %s", reply.Error)
+	}
+
+	// Dial to the plugin's Accept - this blocks until Accept is ready
+	conn, err := rpcClient.broker.Dial(daemonServiceID)
+	if err != nil {
+		return fmt.Errorf("failed to dial daemon service connection: %w", err)
+	}
+
+	// Start RPC server to handle daemon service calls from plugin
+	// ServeConn blocks, so run it in a goroutine
+	server := rpc.NewServer()
+	server.RegisterName("DaemonService", &DaemonServiceServer{Impl: daemonService})
+	go server.ServeConn(conn)
+
+	// Verify the daemon service was successfully set on the plugin
+	// by making a test call that requires the daemon service to be present
+	// This blocks until the plugin's Accept goroutine completes and sets the daemon service
+	var verifyReply VerifyDaemonServiceReply
+	if err := rpcClient.client.Call("Plugin.VerifyDaemonService", &VerifyDaemonServiceArgs{}, &verifyReply); err != nil {
+		return fmt.Errorf("failed to verify daemon service setup: %w", err)
+	}
+	if verifyReply.Error != "" {
+		return fmt.Errorf("daemon service verification failed: %s", verifyReply.Error)
+	}
+
+	return nil
 }
 
 // Close terminates the plugin

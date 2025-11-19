@@ -109,3 +109,18 @@ func (p *DnsmasqRPCProvider) ExecuteCLICommand(ctx context.Context, command stri
 	// Future: could add commands like "jack dhcp leases", "jack dhcp restart"
 	return nil, fmt.Errorf("plugin does not implement CLI commands")
 }
+
+// GetProvidedServices returns the list of services this plugin provides (none)
+func (p *DnsmasqRPCProvider) GetProvidedServices(ctx context.Context) ([]plugins.ServiceDescriptor, error) {
+	return nil, nil
+}
+
+// CallService is not implemented as this plugin doesn't provide services
+func (p *DnsmasqRPCProvider) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
+	return nil, fmt.Errorf("plugin does not provide any services")
+}
+
+// SetDaemonService stores daemon service reference (not used by this plugin)
+func (p *DnsmasqRPCProvider) SetDaemonService(daemon plugins.DaemonService) {
+	// Not used by this plugin
+}

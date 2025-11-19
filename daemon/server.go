@@ -47,6 +47,7 @@ type Server struct {
 	done            chan struct{}
 	handlers        map[string]handlerFunc
 	registry        *PluginRegistry
+	serviceRegistry *ServiceRegistry
 	networkObserver *NetworkObserver
 }
 
@@ -64,10 +65,11 @@ func NewServer() (*Server, error) {
 	}
 
 	s := &Server{
-		state:    NewState(),
-		listener: listener,
-		done:     make(chan struct{}),
-		registry: NewPluginRegistry(),
+		state:           NewState(),
+		listener:        listener,
+		done:            make(chan struct{}),
+		registry:        NewPluginRegistry(),
+		serviceRegistry: NewServiceRegistry(),
 	}
 
 	// Initialize command handlers
@@ -94,9 +96,84 @@ func NewServer() (*Server, error) {
 	return s, nil
 }
 
+// orderPluginsByDependencies returns a list of plugin names sorted by dependencies
+// Plugins with no dependencies come first, then plugins that depend on them, etc.
+func orderPluginsByDependencies(pluginsConfig map[string]types.PluginState) []string {
+	// Build list of enabled plugins
+	var enabledPlugins []string
+	pluginDeps := make(map[string][]string)
+
+	for name, pluginState := range pluginsConfig {
+		if !pluginState.Enabled {
+			continue
+		}
+		enabledPlugins = append(enabledPlugins, name)
+
+		// Load plugin temporarily to get dependencies from metadata
+		plugin, err := LoadPlugin(name)
+		if err != nil {
+			// If we can't load it, add it without dependencies
+			pluginDeps[name] = nil
+			continue
+		}
+
+		metadata := plugin.Metadata()
+		pluginDeps[name] = metadata.Dependencies
+		plugin.Close()
+	}
+
+	// Topological sort
+	var sorted []string
+	visited := make(map[string]bool)
+	temp := make(map[string]bool)
+
+	var visit func(string) bool
+	visit = func(name string) bool {
+		if temp[name] {
+			// Circular dependency detected, but continue anyway
+			return false
+		}
+		if visited[name] {
+			return true
+		}
+
+		temp[name] = true
+		deps := pluginDeps[name]
+		for _, dep := range deps {
+			// Only visit if the dependency is enabled
+			depEnabled := false
+			for _, enabled := range enabledPlugins {
+				if enabled == dep {
+					depEnabled = true
+					break
+				}
+			}
+			if depEnabled {
+				visit(dep)
+			}
+		}
+		temp[name] = false
+		visited[name] = true
+		sorted = append(sorted, name)
+		return true
+	}
+
+	for _, name := range enabledPlugins {
+		if !visited[name] {
+			visit(name)
+		}
+	}
+
+	return sorted
+}
+
 // loadPlugins discovers and loads all configured plugins.
 // Plugins self-register by declaring their namespace via metadata.
 // Only loads plugins that are marked as enabled.
+// Plugins are loaded in waves based on service dependencies:
+// - Wave 1: Plugins with no service dependencies
+// - Wave 2: Plugins whose required services are now ready
+// - Wave N: Continue until all plugins loaded
 func (s *Server) loadPlugins() error {
 	// Load jack config to get plugin list
 	jackConfig, err := state.LoadJackConfig()
@@ -104,67 +181,73 @@ func (s *Server) loadPlugins() error {
 		return fmt.Errorf("failed to load Jack config: %w", err)
 	}
 
-	// Load each configured and enabled plugin
+	// Get list of enabled plugins
+	var enabledPlugins []string
 	for name, pluginState := range jackConfig.Plugins {
-		if !pluginState.Enabled {
-			logger.Info("Skipping disabled plugin",
-				logger.Field{Key: "plugin", Value: name})
-			continue
+		if pluginState.Enabled {
+			enabledPlugins = append(enabledPlugins, name)
 		}
+	}
 
-		plugin, err := LoadPlugin(name)
-		if err != nil {
-			logger.Warn("Failed to load plugin",
-				logger.Field{Key: "plugin", Value: name},
-				logger.Field{Key: "error", Value: err.Error()})
-			continue
-		}
+	logger.Info("Loading plugins in waves based on service readiness",
+		logger.Field{Key: "enabled", Value: fmt.Sprintf("%v", enabledPlugins)})
 
-		// Update version in config
-		metadata := plugin.Metadata()
-		pluginState.Version = metadata.Version
-		jackConfig.Plugins[name] = pluginState
+	// Track which plugins have been loaded
+	loadedPlugins := make(map[string]bool)
 
-		if err := s.registry.Register(plugin, name); err != nil {
-			logger.Warn("Failed to register plugin",
-				logger.Field{Key: "plugin", Value: name},
-				logger.Field{Key: "error", Value: err.Error()})
-			plugin.Close()
-			continue
-		}
+	// Load plugins in waves until all are loaded
+	wave := 1
+	for len(loadedPlugins) < len(enabledPlugins) {
+		logger.Info("Loading plugin wave",
+			logger.Field{Key: "wave", Value: wave})
 
-		// Load and apply plugin config immediately to ensure plugins are ready
-		// before being registered with logger emitter
-		var config map[string]interface{}
-		namespace := metadata.Namespace
-		if err := state.LoadConfig(name, &config); err != nil {
-			// Config file doesn't exist - check if plugin provides defaults
-			if metadata.DefaultConfig != nil {
-				logger.Info("Using plugin default config",
-					logger.Field{Key: "plugin", Value: name})
-				config = metadata.DefaultConfig
-			} else {
-				logger.Info("No config file or defaults available",
-					logger.Field{Key: "plugin", Value: name})
-				config = make(map[string]interface{})
+		pluginsLoadedThisWave := 0
+
+		// Try to load each remaining plugin
+		for _, name := range enabledPlugins {
+			if loadedPlugins[name] {
+				continue // Already loaded
 			}
-		}
-		// Store in state
-		s.state.LoadCommitted(namespace, config)
-		if len(config) > 0 {
-			logger.Info("Loaded plugin configuration",
-				logger.Field{Key: "plugin", Value: name},
-				logger.Field{Key: "namespace", Value: namespace})
-			// Apply config immediately so plugin is initialized
-			if err := plugin.ApplyConfig(config); err != nil {
-				logger.Warn("Failed to apply plugin config",
+
+			// Check if this plugin can be loaded now
+			canLoad, requiredServices := s.canLoadPlugin(name, loadedPlugins)
+			if !canLoad {
+				logger.Info("Plugin not ready - waiting for services",
+					logger.Field{Key: "plugin", Value: name},
+					logger.Field{Key: "required_services", Value: fmt.Sprintf("%v", requiredServices)})
+				continue
+			}
+
+			// Load the plugin
+			if err := s.loadSinglePlugin(name, jackConfig); err != nil {
+				logger.Warn("Failed to load plugin",
 					logger.Field{Key: "plugin", Value: name},
 					logger.Field{Key: "error", Value: err.Error()})
+				// Mark as loaded even if failed to avoid infinite loop
+				loadedPlugins[name] = true
+				continue
+			}
+
+			loadedPlugins[name] = true
+			pluginsLoadedThisWave++
+		}
+
+		if pluginsLoadedThisWave == 0 {
+			// No plugins loaded this wave - check for unmet dependencies
+			var remaining []string
+			for _, name := range enabledPlugins {
+				if !loadedPlugins[name] {
+					remaining = append(remaining, name)
+				}
+			}
+			if len(remaining) > 0 {
+				logger.Warn("Unable to load remaining plugins - unmet dependencies",
+					logger.Field{Key: "plugins", Value: fmt.Sprintf("%v", remaining)})
+				break
 			}
 		}
 
-		// Register plugin with logger emitter if logger is initialized
-		s.registerPluginLogSubscriber(plugin, name)
+		wave++
 	}
 
 	// Save updated config with versions
@@ -178,6 +261,123 @@ func (s *Server) loadPlugins() error {
 
 	logger.Info("Loaded plugins",
 		logger.Field{Key: "plugins", Value: s.registry.List()})
+	return nil
+}
+
+// canLoadPlugin checks if a plugin can be loaded now based on service dependencies
+// Returns true if all required services are ready
+func (s *Server) canLoadPlugin(name string, loadedPlugins map[string]bool) (bool, []string) {
+	// Temporarily load plugin to check its service requirements
+	plugin, err := LoadPlugin(name)
+	if err != nil {
+		return false, nil
+	}
+	defer plugin.Close()
+
+	loader, ok := plugin.(*PluginLoader)
+	if !ok {
+		// Plugin doesn't provide service info - load it immediately
+		return true, nil
+	}
+
+	requiredServices := loader.GetRequiredServices()
+	if len(requiredServices) == 0 {
+		// No service dependencies - can load immediately
+		return true, nil
+	}
+
+	// Check if all required services are ready
+	if s.serviceRegistry.AreServicesReady(requiredServices) {
+		return true, requiredServices
+	}
+
+	return false, requiredServices
+}
+
+// loadSinglePlugin loads and initializes a single plugin
+func (s *Server) loadSinglePlugin(name string, jackConfig *types.JackConfig) error {
+	pluginState := jackConfig.Plugins[name]
+
+	plugin, err := LoadPlugin(name)
+	if err != nil {
+		return fmt.Errorf("failed to load plugin: %w", err)
+	}
+
+	// Update version in config
+	metadata := plugin.Metadata()
+	pluginState.Version = metadata.Version
+	jackConfig.Plugins[name] = pluginState
+
+	if err := s.registry.Register(plugin, name); err != nil {
+		plugin.Close()
+		return fmt.Errorf("failed to register plugin: %w", err)
+	}
+
+	// Register plugin services with service registry
+	if loader, ok := plugin.(*PluginLoader); ok {
+		providedServices := loader.GetProvidedServices()
+		if err := s.serviceRegistry.RegisterPlugin(metadata.Namespace, plugin, providedServices); err != nil {
+			s.registry.Unregister(metadata.Namespace)
+			plugin.Close()
+			return fmt.Errorf("failed to register plugin services: %w", err)
+		}
+
+		// Setup bidirectional RPC for plugin-to-plugin calls
+		daemonService := NewDaemonServiceImpl(s.serviceRegistry)
+		if err := loader.client.SetupDaemonService(daemonService); err != nil {
+			logger.Warn("Failed to setup daemon service for plugin",
+				logger.Field{Key: "plugin", Value: name},
+				logger.Field{Key: "error", Value: err.Error()})
+		}
+	}
+
+	// Load and apply plugin config
+	var config map[string]interface{}
+	namespace := metadata.Namespace
+	if err := state.LoadConfig(name, &config); err != nil {
+		// Config file doesn't exist - check if plugin provides defaults
+		if metadata.DefaultConfig != nil {
+			logger.Info("Using plugin default config",
+				logger.Field{Key: "plugin", Value: name})
+			config = metadata.DefaultConfig
+		} else {
+			logger.Info("No config file or defaults available",
+				logger.Field{Key: "plugin", Value: name})
+			config = make(map[string]interface{})
+		}
+	}
+
+	// Store in state
+	s.state.LoadCommitted(namespace, config)
+
+	if len(config) > 0 {
+		logger.Info("Loaded plugin configuration",
+			logger.Field{Key: "plugin", Value: name},
+			logger.Field{Key: "namespace", Value: namespace})
+
+		// Apply config to initialize plugin
+		if err := plugin.ApplyConfig(config); err != nil {
+			return fmt.Errorf("failed to apply plugin config: %w", err)
+		}
+
+		// Mark plugin's services as ready after successful ApplyConfig
+		if loader, ok := plugin.(*PluginLoader); ok {
+			providedServices := loader.GetProvidedServices()
+			for _, service := range providedServices {
+				s.serviceRegistry.MarkServiceReady(service.Name)
+				logger.Info("Service is ready",
+					logger.Field{Key: "service", Value: service.Name},
+					logger.Field{Key: "provider", Value: namespace})
+			}
+		}
+	}
+
+	// Register plugin with logger emitter if logger is initialized
+	s.registerPluginLogSubscriber(plugin, name)
+
+	logger.Info("Plugin loaded successfully",
+		logger.Field{Key: "plugin", Value: name})
+
 	return nil
 }
 
@@ -701,13 +901,20 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 	appliedSteps = append(appliedSteps, "ipforward")
 
 	// Step 2: Apply interface configuration in correct order
+	logger.Info("[DEBUG] About to call GetCommittedInterfaces()")
 	interfaces := s.state.GetCommittedInterfaces()
+	logger.Info("[DEBUG] GetCommittedInterfaces() returned")
 	orderedNames := orderInterfaces(interfaces.Interfaces)
+
+	logger.Info("[DEBUG] About to apply interfaces",
+		logger.Field{Key: "interface_count", Value: len(orderedNames)})
 
 	// Add interfaces to appliedSteps BEFORE applying, so rollback will restore them if any interface fails
 	appliedSteps = append(appliedSteps, "interfaces")
 
 	for _, name := range orderedNames {
+		logger.Info("[DEBUG] Applying interface",
+			logger.Field{Key: "interface", Value: name})
 		iface := interfaces.Interfaces[name]
 		if err := system.ApplyInterfaceConfig(name, iface); err != nil {
 			// Rollback interfaces and IP forwarding
@@ -722,8 +929,36 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 		}
 	}
 
-	// Step 3: Apply plugin configurations
-	for _, namespace := range s.registry.List() {
+	logger.Info("[DEBUG] Finished applying interfaces")
+
+	// Step 3: Apply plugin configurations in dependency order
+	// Get the jack config to determine plugin order
+	jackConfig := s.state.GetCurrentJackConfig()
+
+	// Order plugins by dependencies
+	var orderedNamespaces []string
+	if jackConfig != nil {
+		orderedPlugins := orderPluginsByDependencies(jackConfig.Plugins)
+		// Convert plugin names to namespaces
+		for _, pluginName := range orderedPlugins {
+			if namespace, found := s.registry.GetNamespaceForPlugin(pluginName); found {
+				orderedNamespaces = append(orderedNamespaces, namespace)
+			}
+		}
+	} else {
+		// Fallback to registry order if we can't get jack config
+		orderedNamespaces = s.registry.List()
+	}
+
+	logger.Info("Applying plugins in dependency order",
+		logger.Field{Key: "order", Value: fmt.Sprintf("%v", orderedNamespaces)})
+
+	logger.Info("[DEBUG] About to start plugin application loop",
+		logger.Field{Key: "plugin_count", Value: len(orderedNamespaces)})
+
+	for _, namespace := range orderedNamespaces {
+		logger.Info("[DEBUG] Processing plugin in loop",
+			logger.Field{Key: "namespace", Value: namespace})
 		plugin, _ := s.registry.Get(namespace)
 
 		// Get plugin name for config file
@@ -775,6 +1010,7 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 		}
 
 		// Apply config through the plugin
+		// Dependency ordering ensures service providers are applied before consumers
 		logger.Info("Applying plugin configuration",
 			logger.Field{Key: "plugin", Value: namespace},
 			logger.Field{Key: "config_file", Value: pluginName + ".json"})
@@ -795,6 +1031,14 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 		s.state.SetLastApplied(namespace, config)
 		logger.Info("Applied plugin configuration",
 			logger.Field{Key: "plugin", Value: namespace})
+
+		// Mark plugin's services as ready after successful ApplyConfig
+		if loader, ok := plugin.(*PluginLoader); ok {
+			providedServices := loader.GetProvidedServices()
+			for _, service := range providedServices {
+				s.serviceRegistry.MarkServiceReady(service.Name)
+			}
+		}
 	}
 	appliedSteps = append(appliedSteps, "plugins")
 
@@ -1290,6 +1534,25 @@ func (s *Server) handlePluginEnable(pluginName string) Response {
 		return Response{Success: false, Error: fmt.Sprintf("failed to register plugin: %v", err)}
 	}
 
+	// Register plugin services with service registry
+	if loader, ok := plugin.(*PluginLoader); ok {
+		providedServices := loader.GetProvidedServices()
+		if err := s.serviceRegistry.RegisterPlugin(metadata.Namespace, plugin, providedServices); err != nil {
+			s.registry.Unregister(metadata.Namespace)
+			plugin.Close()
+			return Response{Success: false, Error: fmt.Sprintf("failed to register plugin services: %v", err)}
+		}
+
+		// Validate that required services are available
+		requiredServices := loader.GetRequiredServices()
+		if err := s.serviceRegistry.ValidateServiceDependencies(requiredServices); err != nil {
+			logger.Warn("Plugin has unmet service dependencies",
+				logger.Field{Key: "plugin", Value: pluginName},
+				logger.Field{Key: "error", Value: err.Error()})
+			// Don't fail - dependencies may be satisfied later
+		}
+	}
+
 	// Load and apply config if it exists (use plugin name for config file)
 	var pluginConfig interface{}
 	if err := state.LoadConfig(pluginName, &pluginConfig); err == nil {
@@ -1390,8 +1653,11 @@ func (s *Server) handlePluginDisable(pluginName string) Response {
 		return Response{Success: false, Error: fmt.Sprintf("failed to unload plugin: %v", err)}
 	}
 
-	// Unregister from registry
+	// Unregister from plugin registry
 	s.registry.Unregister(namespace)
+
+	// Unregister from service registry
+	s.serviceRegistry.UnregisterPlugin(namespace)
 
 	// Update jack config
 	pluginState.Enabled = false

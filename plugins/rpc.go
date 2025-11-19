@@ -14,6 +14,8 @@ package plugins
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net/rpc"
 
 	"github.com/hashicorp/go-plugin"
@@ -50,6 +52,36 @@ type Provider interface {
 	// OnLogEvent receives a log event from the daemon (optional, returns error if not implemented)
 	// logEventJSON is the JSON-encoded log entry
 	OnLogEvent(ctx context.Context, logEventJSON []byte) error
+
+	// GetProvidedServices returns the list of services this plugin provides
+	// Returns empty list if plugin doesn't provide any services
+	GetProvidedServices(ctx context.Context) ([]ServiceDescriptor, error)
+
+	// CallService calls a method on a service provided by this plugin
+	// serviceName: name of the service (e.g., "database")
+	// method: method name (e.g., "InsertLog")
+	// argsJSON: JSON-encoded method arguments
+	// Returns JSON-encoded result or error
+	CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error)
+
+	// SetDaemonService sets the daemon service interface for bidirectional communication
+	// This allows plugins to call services on other plugins through the daemon
+	SetDaemonService(daemon DaemonService)
+}
+
+// DaemonService is the interface that the daemon provides to plugins for bidirectional RPC.
+// Plugins can use this to call services on other plugins through the daemon's service registry.
+type DaemonService interface {
+	// Ping verifies the daemon service connection is responsive
+	// Used to ensure RPC connection is ready before using CallService
+	Ping(ctx context.Context) error
+
+	// CallService calls a service method on another plugin through the daemon's service registry
+	// serviceName: name of the service (e.g., "database")
+	// method: method name (e.g., "InsertLog")
+	// argsJSON: JSON-encoded method arguments
+	// Returns JSON-encoded result or error
+	CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error)
 }
 
 // CLICommand describes a CLI command provided by a plugin
@@ -62,17 +94,26 @@ type CLICommand struct {
 	PollInterval int      `json:"poll_interval,omitempty"` // Polling interval in seconds (default: 2), only used if Continuous is true
 }
 
+// ServiceDescriptor describes a service provided by a plugin
+type ServiceDescriptor struct {
+	Name        string   `json:"name"`        // Service name (e.g., "database")
+	Description string   `json:"description"` // Human-readable description
+	Methods     []string `json:"methods"`     // Available methods (e.g., ["InsertLog", "QueryLogs"])
+}
+
 // MetadataResponse contains plugin metadata
 type MetadataResponse struct {
-	Namespace     string                 `json:"namespace"`
-	Version       string                 `json:"version"`
-	Description   string                 `json:"description"`
-	Category      string                 `json:"category,omitempty"`     // Plugin category (e.g., "firewall", "vpn", "dhcp", "hardware", "monitoring")
-	ConfigPath    string                 `json:"config_path"`
-	DefaultConfig map[string]interface{} `json:"default_config,omitempty"` // Default configuration for the plugin
-	Dependencies  []string               `json:"dependencies,omitempty"`
-	PathPrefix    string                 `json:"path_prefix,omitempty"`  // Prefix to auto-insert in paths (e.g., "leds")
-	CLICommands   []CLICommand           `json:"cli_commands,omitempty"` // CLI commands provided by this plugin
+	Namespace        string                 `json:"namespace"`
+	Version          string                 `json:"version"`
+	Description      string                 `json:"description"`
+	Category         string                 `json:"category,omitempty"`          // Plugin category (e.g., "firewall", "vpn", "dhcp", "hardware", "monitoring")
+	ConfigPath       string                 `json:"config_path"`
+	DefaultConfig    map[string]interface{} `json:"default_config,omitempty"`    // Default configuration for the plugin
+	Dependencies     []string               `json:"dependencies,omitempty"`      // Plugin dependencies (plugin names)
+	RequiredServices []string               `json:"required_services,omitempty"` // Required services (service names like "database")
+	ProvidedServices []ServiceDescriptor    `json:"provided_services,omitempty"` // Services provided by this plugin
+	PathPrefix       string                 `json:"path_prefix,omitempty"`       // Prefix to auto-insert in paths (e.g., "leds")
+	CLICommands      []CLICommand           `json:"cli_commands,omitempty"`      // CLI commands provided by this plugin
 }
 
 // RPCPlugin is the go-plugin Plugin implementation
@@ -82,13 +123,19 @@ type RPCPlugin struct {
 }
 
 // Server returns the RPC server for this plugin
-func (p *RPCPlugin) Server(*plugin.MuxBroker) (interface{}, error) {
-	return &RPCServer{Impl: p.Impl}, nil
+func (p *RPCPlugin) Server(broker *plugin.MuxBroker) (interface{}, error) {
+	return &RPCServer{
+		Impl:   p.Impl,
+		broker: broker,
+	}, nil
 }
 
 // Client returns the RPC client for this plugin
-func (p *RPCPlugin) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, error) {
-	return &RPCClient{client: c}, nil
+func (p *RPCPlugin) Client(broker *plugin.MuxBroker, client *rpc.Client) (interface{}, error) {
+	return &RPCClient{
+		client: client,
+		broker: broker,
+	}, nil
 }
 
 // ============================================================================
@@ -97,7 +144,10 @@ func (p *RPCPlugin) Client(b *plugin.MuxBroker, c *rpc.Client) (interface{}, err
 
 // RPCServer is the RPC server that wraps Provider
 type RPCServer struct {
-	Impl Provider
+	Impl                   Provider
+	broker                 *plugin.MuxBroker
+	daemonServiceReadyChan chan struct{}
+	daemonServiceSetupErr  error
 }
 
 type MetadataArgs struct{}
@@ -209,6 +259,110 @@ func (s *RPCServer) OnLogEvent(args *OnLogEventArgs, reply *OnLogEventReply) err
 	return nil
 }
 
+type GetProvidedServicesArgs struct{}
+type GetProvidedServicesReply struct {
+	Error    string
+	Services []ServiceDescriptor
+}
+
+func (s *RPCServer) GetProvidedServices(args *GetProvidedServicesArgs, reply *GetProvidedServicesReply) error {
+	services, err := s.Impl.GetProvidedServices(context.Background())
+	if err != nil {
+		reply.Error = err.Error()
+		return nil
+	}
+	reply.Services = services
+	return nil
+}
+
+type CallServiceArgs struct {
+	ServiceName string
+	Method      string
+	ArgsJSON    []byte
+}
+type CallServiceReply struct {
+	Error      string
+	ResultJSON []byte
+}
+
+func (s *RPCServer) CallService(args *CallServiceArgs, reply *CallServiceReply) error {
+	resultJSON, err := s.Impl.CallService(context.Background(), args.ServiceName, args.Method, args.ArgsJSON)
+	if err != nil {
+		reply.Error = err.Error()
+		return nil
+	}
+	reply.ResultJSON = resultJSON
+	return nil
+}
+
+type SetDaemonServiceArgs struct {
+	DaemonServiceID uint32 // MuxBroker ID for the daemon service
+}
+type SetDaemonServiceReply struct {
+	Error string
+}
+
+func (s *RPCServer) SetDaemonService(args *SetDaemonServiceArgs, reply *SetDaemonServiceReply) error {
+	// Initialize two channels for two-stage synchronization:
+	// 1. acceptReadyChan - signals Accept() has been called
+	// 2. daemonServiceReadyChan - signals SetDaemonService on impl has been called
+	acceptReadyChan := make(chan struct{})
+	s.daemonServiceReadyChan = make(chan struct{})
+	s.daemonServiceSetupErr = nil
+
+	// Accept connection from daemon service via MuxBroker asynchronously
+	// We need to return from this RPC call so the daemon can Dial to us
+	go func() {
+		// Ensure the ready channel is always closed, even on error
+		defer close(s.daemonServiceReadyChan)
+
+		// Signal that Accept() is about to be called
+		// This allows the RPC to return and Dial() to proceed
+		close(acceptReadyChan)
+
+		conn, err := s.broker.Accept(args.DaemonServiceID)
+		if err != nil {
+			s.daemonServiceSetupErr = fmt.Errorf("failed to accept daemon service connection: %w", err)
+			log.Printf("[PLUGIN] %v", s.daemonServiceSetupErr)
+			return
+		}
+
+		// Create RPC client for daemon service
+		daemonClient := rpc.NewClient(conn)
+		daemonService := &DaemonServiceClient{client: daemonClient}
+
+		// Pass it to the plugin implementation
+		s.Impl.SetDaemonService(daemonService)
+	}()
+
+	// Wait for Accept() to be called before returning
+	// This ensures Dial() won't be called before Accept() is ready
+	<-acceptReadyChan
+
+	reply.Error = ""
+	return nil
+}
+
+type VerifyDaemonServiceArgs struct{}
+type VerifyDaemonServiceReply struct {
+	Error string
+}
+
+func (s *RPCServer) VerifyDaemonService(args *VerifyDaemonServiceArgs, reply *VerifyDaemonServiceReply) error {
+	// Block until the daemon service setup is complete
+	// The channel is closed by SetDaemonService's goroutine after setup completes
+	<-s.daemonServiceReadyChan
+
+	// Check if setup failed
+	if s.daemonServiceSetupErr != nil {
+		reply.Error = s.daemonServiceSetupErr.Error()
+		return nil
+	}
+
+	reply.Error = ""
+	return nil
+}
+
 // ============================================================================
 // RPC Client Implementation
 // ============================================================================
@@ -216,6 +370,7 @@ func (s *RPCServer) OnLogEvent(args *OnLogEventArgs, reply *OnLogEventReply) err
 // RPCClient is the RPC client that implements Provider
 type RPCClient struct {
 	client *rpc.Client
+	broker *plugin.MuxBroker
 }
 
 func (c *RPCClient) Metadata(ctx context.Context) (MetadataResponse, error) {
@@ -306,6 +461,119 @@ func (c *RPCClient) OnLogEvent(ctx context.Context, logEventJSON []byte) error {
 	}
 	return nil
 }
+
+func (c *RPCClient) GetProvidedServices(ctx context.Context) ([]ServiceDescriptor, error) {
+	var reply GetProvidedServicesReply
+	err := c.client.Call("Plugin.GetProvidedServices", &GetProvidedServicesArgs{}, &reply)
+	if err != nil {
+		return nil, err
+	}
+	if reply.Error != "" {
+		return nil, ErrFromString(reply.Error)
+	}
+	return reply.Services, nil
+}
+
+func (c *RPCClient) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
+	var reply CallServiceReply
+	err := c.client.Call("Plugin.CallService", &CallServiceArgs{
+		ServiceName: serviceName,
+		Method:      method,
+		ArgsJSON:    argsJSON,
+	}, &reply)
+	if err != nil {
+		return nil, err
+	}
+	if reply.Error != "" {
+		return nil, ErrFromString(reply.Error)
+	}
+	return reply.ResultJSON, nil
+}
+
+func (c *RPCClient) SetDaemonService(daemon DaemonService) {
+	// This is called by the daemon on the client side
+	// Not actually used in this direction, but required by interface
+}
+
+// ============================================================================
+// DaemonService RPC Implementation
+// ============================================================================
+
+// DaemonServiceServer is the RPC server that wraps DaemonService
+type DaemonServiceServer struct {
+	Impl DaemonService
+}
+
+type DaemonCallServiceArgs struct {
+	ServiceName string
+	Method      string
+	ArgsJSON    []byte
+}
+type DaemonCallServiceReply struct {
+	Error      string
+	ResultJSON []byte
+}
+
+func (s *DaemonServiceServer) CallService(args *DaemonCallServiceArgs, reply *DaemonCallServiceReply) error {
+	resultJSON, err := s.Impl.CallService(context.Background(), args.ServiceName, args.Method, args.ArgsJSON)
+	if err != nil {
+		reply.Error = err.Error()
+		return nil
+	}
+	reply.ResultJSON = resultJSON
+	return nil
+}
+
+type DaemonPingArgs struct{}
+type DaemonPingReply struct {
+	Error string
+}
+
+func (s *DaemonServiceServer) Ping(args *DaemonPingArgs, reply *DaemonPingReply) error {
+	err := s.Impl.Ping(context.Background())
+	if err != nil {
+		reply.Error = err.Error()
+		return nil
+	}
+	return nil
+}
+
+// DaemonServiceClient is the RPC client that implements DaemonService
+type DaemonServiceClient struct {
+	client *rpc.Client
+}
+
+func (c *DaemonServiceClient) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
+	var reply DaemonCallServiceReply
+	err := c.client.Call("DaemonService.CallService", &DaemonCallServiceArgs{
+		ServiceName: serviceName,
+		Method:      method,
+		ArgsJSON:    argsJSON,
+	}, &reply)
+	if err != nil {
+		return nil, err
+	}
+	if reply.Error != "" {
+		return nil, ErrFromString(reply.Error)
+	}
+	return reply.ResultJSON, nil
+}
+
+func (c *DaemonServiceClient) Ping(ctx context.Context) error {
+	var reply DaemonPingReply
+	err := c.client.Call("DaemonService.Ping", &DaemonPingArgs{}, &reply)
+	if err != nil {
+		return err
+	}
+	if reply.Error != "" {
+		return ErrFromString(reply.Error)
+	}
+	return nil
+}
+
+// ============================================================================
+// Helper Functions
+// ============================================================================
 
 // ErrFromString creates an error from a string
 func ErrFromString(s string) error {

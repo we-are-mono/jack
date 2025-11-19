@@ -24,9 +24,11 @@ import (
 // PluginLoader wraps an RPC plugin and implements the Plugin interface.
 // It queries the plugin for its metadata and proxies all calls.
 type PluginLoader struct {
-	client   *plugins.PluginClient
-	provider plugins.Provider
-	metadata plugins.PluginMetadata
+	client           *plugins.PluginClient
+	provider         plugins.Provider
+	metadata         plugins.PluginMetadata
+	providedServices []plugins.ServiceDescriptor
+	requiredServices []string
 }
 
 // LoadPlugin discovers, loads, and wraps a plugin by name.
@@ -68,6 +70,23 @@ func LoadPlugin(name string) (plugins.Plugin, error) {
 		logger.Field{Key: "namespace", Value: metaResp.Namespace},
 		logger.Field{Key: "version", Value: metaResp.Version})
 
+	// Log services if provided
+	if len(metaResp.ProvidedServices) > 0 {
+		for _, svc := range metaResp.ProvidedServices {
+			logger.Info("Plugin provides service",
+				logger.Field{Key: "plugin", Value: name},
+				logger.Field{Key: "service", Value: svc.Name},
+				logger.Field{Key: "methods", Value: fmt.Sprintf("%v", svc.Methods)})
+		}
+	}
+
+	// Log required services if any
+	if len(metaResp.RequiredServices) > 0 {
+		logger.Info("Plugin requires services",
+			logger.Field{Key: "plugin", Value: name},
+			logger.Field{Key: "services", Value: fmt.Sprintf("%v", metaResp.RequiredServices)})
+	}
+
 	// Convert metadata response to PluginMetadata
 	metadata := plugins.PluginMetadata{
 		Namespace:     metaResp.Namespace,
@@ -80,11 +99,15 @@ func LoadPlugin(name string) (plugins.Plugin, error) {
 		PathPrefix:    metaResp.PathPrefix,
 	}
 
-	return &PluginLoader{
-		client:   client,
-		provider: provider,
-		metadata: metadata,
-	}, nil
+	loader := &PluginLoader{
+		client:           client,
+		provider:         provider,
+		metadata:         metadata,
+		providedServices: metaResp.ProvidedServices,
+		requiredServices: metaResp.RequiredServices,
+	}
+
+	return loader, nil
 }
 
 // Metadata returns the plugin's self-declared metadata
@@ -238,4 +261,14 @@ func CheckDependencies(pluginToDisable string, registry *PluginRegistry) error {
 	}
 
 	return nil
+}
+
+// GetProvidedServices returns the list of services this plugin provides
+func (l *PluginLoader) GetProvidedServices() []plugins.ServiceDescriptor {
+	return l.providedServices
+}
+
+// GetRequiredServices returns the list of services this plugin requires
+func (l *PluginLoader) GetRequiredServices() []string {
+	return l.requiredServices
 }

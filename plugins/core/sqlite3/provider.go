@@ -53,21 +53,33 @@ func (p *DatabaseProvider) connect() error {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
 
-	// Open database connection with WAL mode and busy timeout
-	// WAL mode allows concurrent readers and writers
-	dsn := p.config.DatabasePath + "?_journal_mode=WAL&_busy_timeout=5000&_txlock=immediate"
-	db, err := sql.Open("sqlite", dsn)
+	// Open database connection
+	db, err := sql.Open("sqlite", p.config.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// Set connection pool limits to prevent lock contention
+	// Set connection pool to single connection to avoid lock contention
+	// SQLite works best with a single writer connection
 	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	// Test connection
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return fmt.Errorf("failed to ping database: %w", err)
+	}
+
+	// Enable WAL mode for better concurrency
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		return fmt.Errorf("failed to enable WAL mode: %w", err)
+	}
+
+	// Set busy timeout to 2 seconds
+	if _, err := db.Exec("PRAGMA busy_timeout=2000"); err != nil {
+		db.Close()
+		return fmt.Errorf("failed to set busy timeout: %w", err)
 	}
 
 	p.db = db
@@ -77,36 +89,30 @@ func (p *DatabaseProvider) connect() error {
 
 // initializeSchema creates the database tables if they don't exist
 func (p *DatabaseProvider) initializeSchema() error {
-	// Create logs table
-	logsTableSQL := `
-		CREATE TABLE IF NOT EXISTS logs (
+	// Execute schema creation statements individually to avoid lock contention
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS logs (
 			id         INTEGER PRIMARY KEY AUTOINCREMENT,
 			timestamp  TEXT NOT NULL,
 			level      TEXT NOT NULL,
 			component  TEXT NOT NULL,
 			message    TEXT NOT NULL,
 			fields     TEXT
-		);
-		CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp);
-		CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level);
-		CREATE INDEX IF NOT EXISTS idx_logs_component ON logs(component);
-	`
-
-	if _, err := p.db.Exec(logsTableSQL); err != nil {
-		return fmt.Errorf("failed to create logs table: %w", err)
-	}
-
-	// Create plugin_metadata table for extensibility
-	metadataTableSQL := `
-		CREATE TABLE IF NOT EXISTS plugin_metadata (
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON logs(timestamp)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_level ON logs(level)`,
+		`CREATE INDEX IF NOT EXISTS idx_logs_component ON logs(component)`,
+		`CREATE TABLE IF NOT EXISTS plugin_metadata (
 			plugin_name TEXT PRIMARY KEY,
 			version     TEXT,
 			last_update TEXT
-		);
-	`
+		)`,
+	}
 
-	if _, err := p.db.Exec(metadataTableSQL); err != nil {
-		return fmt.Errorf("failed to create plugin_metadata table: %w", err)
+	for _, stmt := range statements {
+		if _, err := p.db.Exec(stmt); err != nil {
+			return fmt.Errorf("failed to create schema: %w", err)
+		}
 	}
 
 	log.Println("[jack-plugin-sqlite3] Database schema initialized")
@@ -224,4 +230,99 @@ func (p *DatabaseProvider) Vacuum() error {
 		return fmt.Errorf("failed to vacuum database: %w", err)
 	}
 	return nil
+}
+
+// Exec executes a SQL statement (INSERT, UPDATE, DELETE, CREATE TABLE, etc.)
+// Returns the number of rows affected
+func (p *DatabaseProvider) Exec(query string, args ...interface{}) (int64, error) {
+	result, err := p.db.Exec(query, args...)
+	if err != nil {
+		return 0, fmt.Errorf("failed to execute query: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("failed to get rows affected: %w", err)
+	}
+
+	return rowsAffected, nil
+}
+
+// Query executes a SELECT query and returns multiple rows
+// Returns column names and rows of values
+func (p *DatabaseProvider) Query(query string, args ...interface{}) ([]string, [][]interface{}, error) {
+	rows, err := p.db.Query(query, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// Scan all rows
+	var results [][]interface{}
+	for rows.Next() {
+		// Create a slice of interface{} to hold each column value
+		columnValues := make([]interface{}, len(columns))
+		columnPointers := make([]interface{}, len(columns))
+		for i := range columnValues {
+			columnPointers[i] = &columnValues[i]
+		}
+
+		// Scan the row
+		if err := rows.Scan(columnPointers...); err != nil {
+			return nil, nil, fmt.Errorf("failed to scan row: %w", err)
+		}
+
+		results = append(results, columnValues)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error iterating rows: %w", err)
+	}
+
+	return columns, results, nil
+}
+
+// QueryRow executes a SELECT query and returns a single row
+// Returns column names and a single row of values
+func (p *DatabaseProvider) QueryRow(query string, args ...interface{}) ([]string, []interface{}, error) {
+	rows, err := p.db.Query(query, args...)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	defer rows.Close()
+
+	// Get column names
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get columns: %w", err)
+	}
+
+	// Check if there's at least one row
+	if !rows.Next() {
+		return columns, nil, nil // No rows found
+	}
+
+	// Create a slice of interface{} to hold each column value
+	columnValues := make([]interface{}, len(columns))
+	columnPointers := make([]interface{}, len(columns))
+	for i := range columnValues {
+		columnPointers[i] = &columnValues[i]
+	}
+
+	// Scan the single row
+	if err := rows.Scan(columnPointers...); err != nil {
+		return nil, nil, fmt.Errorf("failed to scan row: %w", err)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, nil, fmt.Errorf("error reading row: %w", err)
+	}
+
+	return columns, columnValues, nil
 }

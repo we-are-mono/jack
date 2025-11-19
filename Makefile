@@ -37,7 +37,8 @@ coverage-integration: docker-base-image
 	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
 	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
 	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
-	@cd plugins/core/sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
+	@cd plugins/core/sqlite3 && go build -o ../../../bin/jack-plugin-sqlite3 .
+	@cd plugins/core/firewall-logging && go build -o ../../../bin/jack-plugin-firewall-logging .
 	@echo "==> Running integration tests with coverage in container..."
 	@mkdir -p coverage-data
 	@docker run --rm --privileged --cap-add=ALL \
@@ -134,7 +135,8 @@ test-integration: docker-base-image
 	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
 	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
 	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
-	@cd plugins/core/sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
+	@cd plugins/core/sqlite3 && go build -o ../../../bin/jack-plugin-sqlite3 .
+	@cd plugins/core/firewall-logging && go build -o ../../../bin/jack-plugin-firewall-logging .
 	@echo "==> Running integration tests in container..."
 	@docker run --rm --privileged --cap-add=ALL \
 		-v $(PWD):/opt/jack \
@@ -153,7 +155,8 @@ test-docker-combined: docker-base-image
 	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
 	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
 	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
-	@cd plugins/core/sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
+	@cd plugins/core/sqlite3 && go build -o ../../../bin/jack-plugin-sqlite3 .
+	@cd plugins/core/firewall-logging && go build -o ../../../bin/jack-plugin-firewall-logging .
 	@echo "==> Running unit and integration tests in Docker with coverage..."
 	@mkdir -p coverage-data
 	@docker run --rm --privileged --cap-add=ALL \
@@ -178,70 +181,6 @@ test-docker-combined: docker-base-image
 	@go tool cover -html=coverage-data/unit.out -o coverage-data/unit.html
 	@go tool cover -html=coverage-data/integration.out -o coverage-data/integration.html
 	@go tool cover -html=coverage-data/combined.out -o coverage-data/combined.html
-	@echo "==> Generating coverage index page..."
-	@UNIT_COV=$$(go tool cover -func=coverage-data/unit.out | grep total | awk '{print $$3}'); \
-	INTEGRATION_COV=$$(go tool cover -func=coverage-data/integration.out | grep total | awk '{print $$3}'); \
-	COMBINED_COV=$$(go tool cover -func=coverage-combined.out | grep total | awk '{print $$3}'); \
-	cat > coverage-data/index.html <<EOF \
-<!DOCTYPE html> \
-<html> \
-<head> \
-    <title>Jack Coverage Reports</title> \
-    <meta charset="utf-8"> \
-    <style> \
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px auto; max-width: 800px; line-height: 1.6; color: #333; } \
-        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; } \
-        .report { background: #f8f9fa; border-left: 4px solid #3498db; padding: 20px; margin: 20px 0; border-radius: 4px; } \
-        .report h2 { margin-top: 0; color: #2c3e50; } \
-        .coverage { font-size: 2em; font-weight: bold; color: #27ae60; } \
-        .coverage.low { color: #e74c3c; } \
-        .coverage.medium { color: #f39c12; } \
-        a { color: #3498db; text-decoration: none; font-weight: 500; } \
-        a:hover { text-decoration: underline; } \
-        .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin: 30px 0; } \
-        .stat { background: white; border: 1px solid #ddd; padding: 15px; text-align: center; border-radius: 4px; } \
-        .stat-value { font-size: 2.5em; font-weight: bold; margin: 10px 0; } \
-        .stat-label { color: #7f8c8d; font-size: 0.9em; text-transform: uppercase; } \
-        footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #7f8c8d; font-size: 0.9em; } \
-    </style> \
-</head> \
-<body> \
-    <h1>Jack Test Coverage Reports</h1> \
-    <div class="stats"> \
-        <div class="stat"> \
-            <div class="stat-label">Unit Tests</div> \
-            <div class="stat-value">$$UNIT_COV</div> \
-        </div> \
-        <div class="stat"> \
-            <div class="stat-label">Integration Tests</div> \
-            <div class="stat-value">$$INTEGRATION_COV</div> \
-        </div> \
-        <div class="stat"> \
-            <div class="stat-label">Combined</div> \
-            <div class="stat-value">$$COMBINED_COV</div> \
-        </div> \
-    </div> \
-    <div class="report"> \
-        <h2>📊 Combined Coverage</h2> \
-        <p>Merged coverage from both unit and integration tests.</p> \
-        <p><a href="combined.html">View Combined Coverage Report →</a></p> \
-    </div> \
-    <div class="report"> \
-        <h2>🧪 Unit Tests</h2> \
-        <p>Code coverage from unit tests only (no integration tests).</p> \
-        <p><a href="unit.html">View Unit Test Coverage →</a></p> \
-    </div> \
-    <div class="report"> \
-        <h2>🐳 Integration Tests</h2> \
-        <p>Code coverage from integration tests running in Docker.</p> \
-        <p><a href="integration.html">View Integration Test Coverage →</a></p> \
-    </div> \
-    <footer> \
-        <p>Generated by <code>make test-docker-combined</code></p> \
-    </footer> \
-</body> \
-</html> \
-EOF
 	@echo ""
 	@echo "Combined coverage summary:"
 	@go tool cover -func=coverage-combined.out | grep total
@@ -250,8 +189,6 @@ EOF
 	@echo "  - Unit: coverage-data/unit.out → coverage-data/unit.html"
 	@echo "  - Integration: coverage-data/integration.out → coverage-data/integration.html"
 	@echo "  - Combined: coverage-combined.out → coverage-data/combined.html"
-	@echo ""
-	@echo "Run 'make serve-coverage' to view reports in browser"
 
 # Serve coverage reports via HTTP
 serve-coverage:
@@ -275,7 +212,6 @@ serve-coverage:
 	@echo "Starting HTTP server on http://localhost:8080"
 	@echo ""
 	@echo "📊 Coverage reports available at:"
-	@echo "  ➜ http://localhost:8080/ (Coverage overview)"
 	@echo "  ➜ http://localhost:8080/combined.html (Combined coverage)"
 	@echo "  ➜ http://localhost:8080/unit.html (Unit tests only)"
 	@echo "  ➜ http://localhost:8080/integration.html (Integration tests only)"
