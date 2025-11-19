@@ -33,7 +33,6 @@ const (
 // DnsmasqProvider implements both DHCPProvider and DNSProvider interfaces
 type DnsmasqProvider struct {
 	dhcpConfigPath string
-	dnsConfigPath  string
 	templatePath   string
 }
 
@@ -46,7 +45,6 @@ func NewDnsmasq() (*DnsmasqProvider, error) {
 
 	return &DnsmasqProvider{
 		dhcpConfigPath: dnsmasqConfigPath,
-		dnsConfigPath:  dnsmasqConfigPath, // Same config file for now
 		templatePath:   dnsmasqTemplatePath,
 	}, nil
 }

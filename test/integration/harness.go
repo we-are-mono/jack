@@ -15,7 +15,6 @@
 package integration
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -119,16 +118,6 @@ func (h *TestHarness) DeleteInterface(name string) {
 // StartDaemon starts the Jack daemon
 // The daemon runs in the same namespace as the test, so it can see all created interfaces
 func (h *TestHarness) StartDaemon(ctx context.Context) error {
-	return h.startDaemonInternal(ctx, nil)
-}
-
-// StartDaemonWithOutput starts the Jack daemon and captures log output to the provided writer
-func (h *TestHarness) StartDaemonWithOutput(ctx context.Context, logWriter *bytes.Buffer) error {
-	return h.startDaemonInternal(ctx, logWriter)
-}
-
-// startDaemonInternal is the internal implementation of daemon startup
-func (h *TestHarness) startDaemonInternal(ctx context.Context, logWriter *bytes.Buffer) error {
 	// Create empty interfaces.json to prevent auto-detection (only if it doesn't exist)
 	// Tests will use "set" command to configure interfaces explicitly
 	// Preserve existing interfaces.json if it exists (for persistence tests)
@@ -148,14 +137,8 @@ func (h *TestHarness) startDaemonInternal(ctx context.Context, logWriter *bytes.
 	}
 	emitter := logger.NewEmitter()
 
-	// Set up log backends
+	// Set up logger (tests don't capture logs)
 	var backends []logger.Backend
-	if logWriter != nil {
-		// For tests: capture logs to buffer
-		bufferBackend := logger.NewBufferBackend(logWriter, "json")
-		backends = []logger.Backend{bufferBackend}
-	}
-
 	logger.Init(loggerConfig, backends, emitter)
 
 	// Create daemon server

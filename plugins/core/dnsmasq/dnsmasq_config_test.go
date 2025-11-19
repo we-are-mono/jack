@@ -12,9 +12,10 @@
 package main
 
 import (
-	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/we-are-mono/jack/types"
 )
 
@@ -282,6 +283,21 @@ func TestValidateDHCPConfig(t *testing.T) {
 			},
 			wantError: false,
 		},
+		{
+			name: "pool with extremely large range",
+			config: &DHCPConfig{
+				Server: DHCPServer{Enabled: true},
+				DHCPPools: map[string]DHCPPool{
+					"lan": {
+						Interface: "br-lan",
+						Start:     1,
+						Limit:     1000,
+					},
+				},
+			},
+			wantError:  true,
+			errContain: "invalid limit",
+		},
 	}
 
 	for _, tt := range tests {
@@ -289,16 +305,12 @@ func TestValidateDHCPConfig(t *testing.T) {
 			err := ValidateDHCPConfig(tt.config)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidateDHCPConfig() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidateDHCPConfig() error = %q, want to contain %q", err.Error(), tt.errContain)
+				require.Error(t, err, "ValidateDHCPConfig() expected error")
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
 				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidateDHCPConfig() unexpected error: %v", err)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -551,6 +563,39 @@ func TestValidateDNSConfig(t *testing.T) {
 			wantError:  true,
 			errContain: "name is required",
 		},
+		{
+			name: "SRV record with port 0",
+			config: &DNSConfig{
+				Records: DNSRecords{
+					SRVRecords: []SRVRecord{
+						{Service: "http", Proto: "tcp", Target: "server.local", Port: 0},
+					},
+				},
+			},
+			wantError:  true,
+			errContain: "invalid port",
+		},
+		{
+			name: "SRV record with port exceeding maximum",
+			config: &DNSConfig{
+				Records: DNSRecords{
+					SRVRecords: []SRVRecord{
+						{Service: "http", Proto: "tcp", Target: "server.local", Port: 99999},
+					},
+				},
+			},
+			wantError:  true,
+			errContain: "invalid port",
+		},
+		{
+			name: "DNS server port 0 is valid (use default)",
+			config: &DNSConfig{
+				Server: DNSServer{
+					Port: 0,
+				},
+			},
+			wantError: false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -558,16 +603,12 @@ func TestValidateDNSConfig(t *testing.T) {
 			err := ValidateDNSConfig(tt.config)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidateDNSConfig() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidateDNSConfig() error = %q, want to contain %q", err.Error(), tt.errContain)
+				require.Error(t, err, "ValidateDNSConfig() expected error")
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
 				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidateDNSConfig() unexpected error: %v", err)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -604,9 +645,7 @@ func TestNetworkPortion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := NetworkPortion(tt.ip)
-			if result != tt.want {
-				t.Errorf("NetworkPortion(%q) = %q, want %q", tt.ip, result, tt.want)
-			}
+			assert.Equal(t, tt.want, result, "NetworkPortion(%q)", tt.ip)
 		})
 	}
 }
@@ -632,9 +671,7 @@ func TestIsValidLeaseTime(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isValidLeaseTime(tt.leaseTime)
-			if result != tt.want {
-				t.Errorf("isValidLeaseTime(%q) = %v, want %v", tt.leaseTime, result, tt.want)
-			}
+			assert.Equal(t, tt.want, result, "isValidLeaseTime(%q)", tt.leaseTime)
 		})
 	}
 }
@@ -661,9 +698,7 @@ func TestIsValidMAC(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := isValidMAC(tt.mac)
-			if result != tt.want {
-				t.Errorf("isValidMAC(%q) = %v, want %v", tt.mac, result, tt.want)
-			}
+			assert.Equal(t, tt.want, result, "isValidMAC(%q)", tt.mac)
 		})
 	}
 }
@@ -692,18 +727,12 @@ func TestGetInterfaceIPsFromConfig(t *testing.T) {
 	result := GetInterfaceIPsFromConfig(config)
 
 	// Check expected IPs are present
-	if result["br-lan"] != "192.168.1.1" {
-		t.Errorf("Expected br-lan IP to be 192.168.1.1, got %s", result["br-lan"])
-	}
-
-	if result["eth0"] != "10.0.0.1" {
-		t.Errorf("Expected eth0 IP to be 10.0.0.1, got %s", result["eth0"])
-	}
+	assert.Equal(t, "192.168.1.1", result["br-lan"], "Expected br-lan IP")
+	assert.Equal(t, "10.0.0.1", result["eth0"], "Expected eth0 IP")
 
 	// Check interface without IP is not in the map
-	if _, exists := result["eth1"]; exists {
-		t.Errorf("Expected eth1 to not be in result map")
-	}
+	_, exists := result["eth1"]
+	assert.False(t, exists, "Expected eth1 to not be in result map")
 }
 
 func TestGetInterfaceDevicesFromConfig(t *testing.T) {
@@ -730,17 +759,12 @@ func TestGetInterfaceDevicesFromConfig(t *testing.T) {
 	result := GetInterfaceDevicesFromConfig(config)
 
 	// Check bridge device is present
-	if result["br-lan"] != "br-lan" {
-		t.Errorf("Expected br-lan device to be br-lan, got %s", result["br-lan"])
-	}
+	assert.Equal(t, "br-lan", result["br-lan"], "Expected br-lan device")
 
 	// Check physical device is present
-	if result["eth0"] != "eth0" {
-		t.Errorf("Expected eth0 device to be eth0, got %s", result["eth0"])
-	}
+	assert.Equal(t, "eth0", result["eth0"], "Expected eth0 device")
 
 	// Check VLAN interface is not in the map
-	if _, exists := result["vlan10"]; exists {
-		t.Errorf("Expected vlan10 to not be in result map")
-	}
+	_, exists := result["vlan10"]
+	assert.False(t, exists, "Expected vlan10 to not be in result map")
 }

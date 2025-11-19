@@ -83,23 +83,6 @@ func (r *PluginRegistry) List() []string {
 	return names
 }
 
-// ListByCategory returns all registered plugin namespaces grouped by category
-func (r *PluginRegistry) ListByCategory() map[string][]string {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	categories := make(map[string][]string)
-	for namespace, plugin := range r.plugins {
-		metadata := plugin.Metadata()
-		category := metadata.Category
-		if category == "" {
-			category = "other" // Default category for plugins without one
-		}
-		categories[category] = append(categories[category], namespace)
-	}
-	return categories
-}
-
 // Unregister removes a plugin from the registry
 func (r *PluginRegistry) Unregister(namespace string) {
 	r.mu.Lock()

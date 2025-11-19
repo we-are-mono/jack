@@ -24,14 +24,12 @@ import (
 // PluginLogSubscriber wraps a plugin RPC client and implements logger.Subscriber
 type PluginLogSubscriber struct {
 	plugin plugins.Provider
-	name   string
 }
 
 // NewPluginLogSubscriber creates a subscriber that forwards log events to a plugin
 func NewPluginLogSubscriber(plugin plugins.Provider, name string) *PluginLogSubscriber {
 	return &PluginLogSubscriber{
 		plugin: plugin,
-		name:   name,
 	}
 }
 

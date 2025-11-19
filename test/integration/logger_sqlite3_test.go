@@ -15,7 +15,6 @@
 package integration
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -88,22 +87,18 @@ func TestLoggerSQLite3BasicIntegration(t *testing.T) {
 	err = os.WriteFile(filepath.Join(harness.configDir, "routes.json"), routesJSON, 0644)
 	require.NoError(t, err)
 
-	// Start daemon with log capture
+	// Start daemon
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	logBuffer := &bytes.Buffer{}
 	serverDone := make(chan struct{})
 	go func() {
 		defer close(serverDone)
-		_ = harness.StartDaemonWithOutput(ctx, logBuffer)
+		_ = harness.StartDaemon(ctx)
 	}()
 
 	// Wait for daemon to be ready
 	harness.WaitForDaemon(5 * time.Second)
-
-	// Print daemon logs for debugging
-	t.Logf("Daemon logs:\n%s", logBuffer.String())
 
 	// Trigger some daemon activity that generates logs
 	resp, err := harness.SendRequest(daemon.Request{Command: "status"})

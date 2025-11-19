@@ -544,57 +544,5 @@ func TestMaybeReconcile(t *testing.T) {
 	}
 }
 
-// TestRouteDestinationsMatch tests route destination comparison logic
-func TestRouteDestinationsMatch(t *testing.T) {
-	tests := []struct {
-		name     string
-		actual   string
-		desired  string
-		expected bool
-	}{
-		{
-			name:     "both default",
-			actual:   "default",
-			desired:  "default",
-			expected: true,
-		},
-		{
-			name:     "actual default, desired 0.0.0.0/0",
-			actual:   "default",
-			desired:  "0.0.0.0/0",
-			expected: true,
-		},
-		{
-			name:     "actual 0.0.0.0/0, desired default",
-			actual:   "0.0.0.0/0",
-			desired:  "default",
-			expected: true,
-		},
-		{
-			name:     "same CIDR",
-			actual:   "192.168.1.0/24",
-			desired:  "192.168.1.0/24",
-			expected: true,
-		},
-		{
-			name:     "different networks",
-			actual:   "192.168.1.0/24",
-			desired:  "192.168.2.0/24",
-			expected: false,
-		},
-		{
-			name:     "same network, different notation",
-			actual:   "192.168.1.0/24",
-			desired:  "192.168.1.128/24", // Will normalize to 192.168.1.0/24
-			expected: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := routeDestinationsMatch(tt.actual, tt.desired)
-			assert.Equal(t, tt.expected, result)
-		})
-	}
-}
+// NOTE: TestRouteDestinationsMatch has been moved to observer_helpers_test.go
 

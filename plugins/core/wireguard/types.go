@@ -12,6 +12,12 @@
 // Package wireguard implements VPN management using WireGuard.
 package main
 
+import (
+	"fmt"
+
+	"github.com/we-are-mono/jack/validation"
+)
+
 // VPNConfig represents the VPN configuration.
 type VPNConfig struct {
 	Version    string                  `json:"version"`
@@ -41,4 +47,71 @@ type WireGuardPeer struct {
 	AllowedIPs          []string `json:"allowed_ips"`
 	PersistentKeepalive int      `json:"persistent_keepalive,omitempty"`
 	Comment             string   `json:"comment,omitempty"`
+}
+
+// Validate checks if the VPNConfig is valid.
+func (vc *VPNConfig) Validate() error {
+	v := validation.NewCollector()
+
+	for ifaceName, iface := range vc.Interfaces {
+		if err := iface.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("VPN interface %s", ifaceName))
+		}
+	}
+
+	return v.Error()
+}
+
+// Validate checks if the VPNInterface is valid.
+func (vi *VPNInterface) Validate() error {
+	v := validation.NewCollector()
+
+	if vi.ListenPort > 0 {
+		v.CheckMsg(validation.ValidatePort(vi.ListenPort), "invalid listen port")
+	}
+
+	if vi.PrivateKey != "" {
+		v.CheckMsg(validation.ValidateWireGuardKey(vi.PrivateKey), "invalid private key")
+	}
+
+	if vi.Address != "" {
+		v.CheckMsg(validation.ValidateIP(vi.Address), "invalid address")
+	}
+
+	if vi.Netmask != "" {
+		v.CheckMsg(validation.ValidateNetmask(vi.Netmask), "invalid netmask")
+	}
+
+	if vi.MTU > 0 {
+		v.CheckMsg(validation.ValidateMTU(vi.MTU), "invalid MTU")
+	}
+
+	for idx, peer := range vi.Peers {
+		if err := peer.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("peer %d", idx))
+		}
+	}
+
+	return v.Error()
+}
+
+// Validate checks if the WireGuardPeer is valid.
+func (wp *WireGuardPeer) Validate() error {
+	v := validation.NewCollector()
+
+	v.CheckMsg(validation.ValidateWireGuardKey(wp.PublicKey), "invalid public key")
+
+	if wp.PresharedKey != "" {
+		v.CheckMsg(validation.ValidateWireGuardKey(wp.PresharedKey), "invalid preshared key")
+	}
+
+	if wp.Endpoint != "" {
+		v.CheckMsg(validation.ValidateEndpoint(wp.Endpoint), "invalid endpoint")
+	}
+
+	for _, allowedIP := range wp.AllowedIPs {
+		v.CheckMsg(validation.ValidateCIDR(allowedIP), fmt.Sprintf("invalid allowed IP %s", allowedIP))
+	}
+
+	return v.Error()
 }

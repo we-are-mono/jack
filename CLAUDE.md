@@ -557,6 +557,145 @@ jack set firewall '{"zones": {"wan": {"interfaces": ["eth0"]}}}'
 
 Using `jack set` provides immediate feedback and validates the entire configuration pipeline (parsing, validation, application) in one step. Only use direct system commands (e.g., `ip`, `nft`, `echo > /sys/`) when testing low-level functionality or debugging specific issues.
 
+### Testing Best Practices
+
+**CRITICAL: Always prefer testify/assert for unit tests.**
+
+All unit tests should use the [testify/assert](https://github.com/stretchr/testify) library instead of manual error checking. This provides:
+- Cleaner, more readable test code
+- Consistent assertion patterns across the codebase
+- Better error messages when tests fail
+- Less boilerplate code
+
+**Import structure:**
+```go
+import (
+    "testing"
+
+    "github.com/stretchr/testify/assert"
+    "github.com/stretchr/testify/require"
+)
+```
+
+**When to use `require` vs `assert`:**
+- **`require`** (fatal) - Test should stop immediately if this fails (e.g., setup operations, critical preconditions)
+- **`assert`** (non-fatal) - Test can continue even if this fails (e.g., multiple field validations)
+
+**Standard assertion patterns:**
+
+```go
+// Error checking - fatal if error occurs
+require.NoError(t, err)
+require.NoError(t, err, "Optional custom message")
+
+// Expected errors - fatal if no error
+require.Error(t, err, "Function() expected error")
+if errContain != "" {
+    assert.Contains(t, err.Error(), errContain)
+}
+
+// Value comparisons - non-fatal
+assert.Equal(t, expected, actual)
+assert.Equal(t, expected, actual, "Optional custom message")
+
+// Nil checks
+require.NotNil(t, value, "Expected non-nil value")
+assert.Nil(t, value, "Expected nil value")
+
+// Boolean checks
+assert.True(t, condition)
+assert.False(t, condition)
+
+// String/slice containment
+assert.Contains(t, haystack, needle)
+assert.NotContains(t, haystack, needle)
+
+// Length checks
+require.Len(t, slice, expectedLength)
+assert.Empty(t, value)
+assert.NotEmpty(t, value)
+```
+
+**Common table-driven test pattern:**
+
+```go
+func TestValidateConfig(t *testing.T) {
+    tests := []struct {
+        name       string
+        config     *Config
+        wantError  bool
+        errContain string
+    }{
+        {
+            name:      "valid config",
+            config:    &Config{Field: "value"},
+            wantError: false,
+        },
+        {
+            name:       "invalid config",
+            config:     &Config{Field: ""},
+            wantError:  true,
+            errContain: "field cannot be empty",
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := ValidateConfig(tt.config)
+
+            if tt.wantError {
+                require.Error(t, err, "ValidateConfig() expected error")
+                if tt.errContain != "" {
+                    assert.Contains(t, err.Error(), tt.errContain)
+                }
+            } else {
+                require.NoError(t, err)
+            }
+        })
+    }
+}
+```
+
+**Migration from manual assertions:**
+
+When converting existing tests to testify:
+
+```go
+// ❌ OLD STYLE: Manual error checking
+if err != nil {
+    t.Fatalf("Function() unexpected error: %v", err)
+}
+if got != want {
+    t.Errorf("Function() = %v, want %v", got, want)
+}
+
+// ✅ NEW STYLE: testify/assert
+require.NoError(t, err)
+assert.Equal(t, want, got)
+```
+
+**Important migration lessons:**
+
+1. **Avoid over-reliance on automated replacements** - Large files (500+ lines) with complex assertion patterns require careful manual migration. Automated regex replacements can create syntax errors (e.g., broken else-clauses).
+
+2. **Always verify with gofmt and test execution** - After migration:
+   ```bash
+   gofmt -w path/to/test_file.go
+   go test ./path/to/package -v
+   ```
+
+3. **Clean up unused imports** - After migrating `strings.Contains()` to `assert.Contains()`, remove unused `strings` imports.
+
+4. **Use consistent patterns** - Follow the table-driven test pattern above for error checking across all tests.
+
+5. **Batch similar files** - Group migrations by package (e.g., all `cmd/` tests, all `system/` tests) for efficiency.
+
+**When NOT to use testify:**
+
+- Integration tests can use testify, but focus on system-level validation
+- Benchmark tests (`testing.B`) may skip testify for performance-critical assertions
+- Tests that specifically validate error message formatting may need direct string comparison
+
 ### Test Quality Standards
 
 **CRITICAL RULE: ALL TESTS MUST PASS.**
@@ -802,6 +941,34 @@ func TestSomeFeature(t *testing.T) {
 - Base chains (INPUT, OUTPUT, FORWARD) need netfilter hooks to actually process packets
 - Zone chains dispatch from base chains and handle zone-specific policies
 - Masquerading on VPN client interfaces breaks source IP visibility - only masquerade on outbound zones
+
+## Tips
+
+### Go Map Iteration is Non-Deterministic
+
+**Issue**: Go's map iteration order is intentionally randomized. This can cause flaky tests and race conditions when map iteration order matters.
+
+**Example Problem**: When applying multiple network interfaces from a `map[string]Interface`, the order of processing is non-deterministic. If interface A fails during apply, the system state depends on which interfaces were already processed before the failure.
+
+**Solution**: Always use explicit ordering when processing maps where order matters:
+
+```go
+// ❌ BAD: Non-deterministic order
+for name, iface := range interfaces {
+    applyInterface(name, iface)
+}
+
+// ✅ GOOD: Explicit, deterministic ordering
+orderedNames := orderInterfaces(interfaces)  // Sort by type: physical, bridge, vlan
+for _, name := range orderedNames {
+    iface := interfaces[name]
+    applyInterface(name, iface)
+}
+```
+
+**Testing Implications**: Tests that depend on map iteration order may pass sometimes and fail other times. Always assume maps are unordered and use explicit ordering when needed.
+
+**Related Code**: See `daemon/server.go:1214` (`orderInterfaces` function) and the rollback logic fix in `daemon/server.go:707-708`.
 
 ## Important Files
 

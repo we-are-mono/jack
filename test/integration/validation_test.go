@@ -606,6 +606,136 @@ func TestEmptyConfiguration(t *testing.T) {
 	assert.True(t, resp.Success, "empty routes should be valid")
 }
 
+// TestCommitBlocksInvalidConfig tests that commit blocks invalid configurations
+func TestCommitBlocksInvalidConfig(t *testing.T) {
+	harness := NewTestHarness(t)
+	defer harness.Cleanup()
+
+	eth0 := harness.CreateDummyInterface("eth0")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go func() {
+		_ = harness.StartDaemon(ctx)
+	}()
+
+	harness.WaitForDaemon(5 * time.Second)
+
+	t.Run("Invalid IP address blocks commit", func(t *testing.T) {
+		interfaces := map[string]types.Interface{
+			eth0: {
+				Type:     "physical",
+				Device:   eth0,
+				Enabled:  true,
+				Protocol: "static",
+				IPAddr:   "999.999.999.999", // Invalid IP
+				Netmask:  "255.255.255.0",
+			},
+		}
+
+		_, err := harness.SendRequest(daemon.Request{
+			Command: "set",
+			Path:    "interfaces",
+			Value:   interfaces,
+		})
+		require.NoError(t, err)
+
+		// Commit should fail with validation error
+		resp, err := harness.SendRequest(daemon.Request{Command: "commit"})
+		require.NoError(t, err)
+		assert.False(t, resp.Success, "commit should fail for invalid IP")
+		assert.Contains(t, resp.Error, "validation failed", "error should mention validation failure")
+	})
+
+	t.Run("Invalid MTU blocks commit", func(t *testing.T) {
+		// Revert the previous invalid change
+		_, _ = harness.SendRequest(daemon.Request{Command: "revert"})
+
+		interfaces := map[string]types.Interface{
+			eth0: {
+				Type:     "physical",
+				Device:   eth0,
+				Enabled:  true,
+				Protocol: "static",
+				IPAddr:   "10.0.0.1",
+				Netmask:  "255.255.255.0",
+				MTU:      100000, // Invalid MTU (too large)
+			},
+		}
+
+		_, err := harness.SendRequest(daemon.Request{
+			Command: "set",
+			Path:    "interfaces",
+			Value:   interfaces,
+		})
+		require.NoError(t, err)
+
+		// Commit should fail with validation error
+		resp, err := harness.SendRequest(daemon.Request{Command: "commit"})
+		require.NoError(t, err)
+		assert.False(t, resp.Success, "commit should fail for invalid MTU")
+		assert.Contains(t, resp.Error, "validation failed", "error should mention validation failure")
+	})
+
+	t.Run("Invalid route destination blocks commit", func(t *testing.T) {
+		// Revert the previous invalid change
+		_, _ = harness.SendRequest(daemon.Request{Command: "revert"})
+
+		routes := map[string]types.Route{
+			"bad-route": {
+				Name:        "bad-route",
+				Destination: "not-a-cidr", // Invalid CIDR
+				Gateway:     "10.0.0.1",
+				Metric:      100,
+				Enabled:     true,
+			},
+		}
+
+		_, err := harness.SendRequest(daemon.Request{
+			Command: "set",
+			Path:    "routes",
+			Value:   routes,
+		})
+		require.NoError(t, err)
+
+		// Commit should fail with validation error
+		resp, err := harness.SendRequest(daemon.Request{Command: "commit"})
+		require.NoError(t, err)
+		assert.False(t, resp.Success, "commit should fail for invalid route destination")
+		assert.Contains(t, resp.Error, "validation failed", "error should mention validation failure")
+	})
+
+	t.Run("Valid configuration commits successfully", func(t *testing.T) {
+		// Revert the previous invalid change
+		_, _ = harness.SendRequest(daemon.Request{Command: "revert"})
+
+		interfaces := map[string]types.Interface{
+			eth0: {
+				Type:     "physical",
+				Device:   eth0,
+				Enabled:  true,
+				Protocol: "static",
+				IPAddr:   "10.0.0.1",
+				Netmask:  "255.255.255.0",
+				MTU:      1500,
+			},
+		}
+
+		_, err := harness.SendRequest(daemon.Request{
+			Command: "set",
+			Path:    "interfaces",
+			Value:   interfaces,
+		})
+		require.NoError(t, err)
+
+		// Commit should succeed
+		resp, err := harness.SendRequest(daemon.Request{Command: "commit"})
+		require.NoError(t, err)
+		assert.True(t, resp.Success, "commit should succeed for valid config")
+	})
+}
+
 // TestRouteMetricBoundary tests route metric boundary values
 func TestRouteMetricBoundary(t *testing.T) {
 	harness := NewTestHarness(t)

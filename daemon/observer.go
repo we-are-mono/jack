@@ -13,15 +13,12 @@
 package daemon
 
 import (
-	"fmt"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
 	"github.com/vishvananda/netlink"
 	"github.com/we-are-mono/jack/daemon/logger"
-	"github.com/we-are-mono/jack/types"
 	"golang.org/x/sys/unix"
 )
 
@@ -249,40 +246,16 @@ func (o *NetworkObserver) isRecentChange() bool {
 func (o *NetworkObserver) checkLinkDrift(linkName string, isUp bool, actualMTU int) string {
 	// Get Jack's desired interface configuration
 	config := o.server.state.GetCurrentInterfaces()
-	if config == nil || config.Interfaces == nil {
-		return "" // No config to compare against
-	}
 
 	// Find the interface in Jack's config by matching device name
-	var desiredIface *types.Interface
-	var configName string
-	for name, iface := range config.Interfaces {
-		if iface.DeviceName == linkName || iface.Device == linkName {
-			desiredIface = &iface
-			configName = name
-			break
-		}
-	}
-
-	if desiredIface == nil {
+	desiredIface, configName, found := findInterfaceByDevice(config, linkName)
+	if !found {
 		// Interface not managed by Jack, ignore
 		return ""
 	}
 
-	// Check if interface should be enabled
-	if desiredIface.Enabled && !isUp {
-		return fmt.Sprintf("Interface %s (%s) is down but should be up", linkName, configName)
-	}
-	if !desiredIface.Enabled && isUp {
-		return fmt.Sprintf("Interface %s (%s) is up but should be down", linkName, configName)
-	}
-
-	// Check MTU if specified
-	if desiredIface.MTU > 0 && actualMTU != desiredIface.MTU {
-		return fmt.Sprintf("Interface %s (%s) has MTU %d but should have %d", linkName, configName, actualMTU, desiredIface.MTU)
-	}
-
-	return "" // No drift detected
+	// Use pure helper function for comparison
+	return compareLinkState(desiredIface, configName, linkName, isUp, actualMTU)
 }
 
 // checkAddressDrift compares the actual IP address with Jack's desired configuration
@@ -290,38 +263,16 @@ func (o *NetworkObserver) checkLinkDrift(linkName string, isUp bool, actualMTU i
 func (o *NetworkObserver) checkAddressDrift(linkName, ipAddr string, isNew bool) string {
 	// Get Jack's desired interface configuration
 	config := o.server.state.GetCurrentInterfaces()
-	if config == nil || config.Interfaces == nil {
-		return ""
-	}
 
 	// Find the interface in Jack's config
-	var desiredIface *types.Interface
-	var configName string
-	for name, iface := range config.Interfaces {
-		if iface.DeviceName == linkName || iface.Device == linkName {
-			desiredIface = &iface
-			configName = name
-			break
-		}
-	}
-
-	if desiredIface == nil {
+	desiredIface, configName, found := findInterfaceByDevice(config, linkName)
+	if !found {
 		// Interface not managed by Jack
 		return ""
 	}
 
-	// Check if the IP address matches Jack's configuration
-	if desiredIface.IPAddr != "" {
-		// Strip CIDR suffix from both for comparison (e.g., "10.0.0.1/24" -> "10.0.0.1")
-		desiredIP := strings.Split(desiredIface.IPAddr, "/")[0]
-		actualIP := strings.Split(ipAddr, "/")[0]
-
-		if isNew && actualIP != desiredIP {
-			return fmt.Sprintf("Interface %s (%s) has unexpected IP %s (expected %s)", linkName, configName, actualIP, desiredIP)
-		}
-	}
-
-	return ""
+	// Use pure helper function for comparison
+	return compareIPAddress(desiredIface, configName, linkName, ipAddr, isNew)
 }
 
 // checkRouteDrift compares the actual route with Jack's desired configuration
@@ -346,40 +297,22 @@ func (o *NetworkObserver) checkRouteDrift(route *netlink.Route, action string) s
 		routeGw = route.Gw.String()
 	}
 
+	actualRoute := RouteData{
+		Dst:   routeDst,
+		Gw:    routeGw,
+		Table: route.Table,
+	}
+
 	// Check if this route is managed by Jack
 	for name, desiredRoute := range config.Routes {
 		if !desiredRoute.Enabled {
 			continue
 		}
 
-		// Normalize destination (support "default" keyword)
-		desiredDst := desiredRoute.Destination
-		if desiredDst == "default" {
-			desiredDst = "0.0.0.0/0"
+		// Use pure helper function for comparison
+		if drift := compareRoute(desiredRoute, name, actualRoute, action); drift != "" {
+			return drift
 		}
-
-		// Compare destination
-		if !routeDestinationsMatch(routeDst, desiredDst) {
-			continue
-		}
-
-		// This is a Jack-managed route - check for drift
-		if action == "deleted" {
-			return fmt.Sprintf("Route %s (%s) was deleted externally", name, desiredDst)
-		}
-
-		// Compare gateway if specified
-		if desiredRoute.Gateway != "" && desiredRoute.Gateway != routeGw {
-			return fmt.Sprintf("Route %s (%s) has gateway %s but should have %s", name, desiredDst, routeGw, desiredRoute.Gateway)
-		}
-
-		// Compare table if specified
-		if desiredRoute.Table > 0 && route.Table != desiredRoute.Table {
-			return fmt.Sprintf("Route %s (%s) is in table %d but should be in table %d", name, desiredDst, route.Table, desiredRoute.Table)
-		}
-
-		// Route matches desired config
-		return ""
 	}
 
 	// Route not managed by Jack

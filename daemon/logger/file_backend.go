@@ -19,7 +19,6 @@ import (
 
 // FileBackend writes log entries to a file
 type FileBackend struct {
-	path   string
 	format string // "json" or "text"
 	file   *os.File
 	mu     sync.Mutex
@@ -39,7 +38,6 @@ func NewFileBackend(path string, format string) (*FileBackend, error) {
 	}
 
 	return &FileBackend{
-		path:   path,
 		format: format,
 		file:   file,
 	}, nil

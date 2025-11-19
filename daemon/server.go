@@ -27,6 +27,7 @@ import (
 	"github.com/we-are-mono/jack/state"
 	"github.com/we-are-mono/jack/system"
 	"github.com/we-are-mono/jack/types"
+	"github.com/we-are-mono/jack/validation"
 )
 
 // GetSocketPath returns the socket path, preferring JACK_SOCKET_PATH env var
@@ -512,7 +513,66 @@ func (s *Server) handleDiff() Response {
 	}
 }
 
+// validatePending validates all pending configurations before committing
+func (s *Server) validatePending() error {
+	v := validation.NewCollector()
+
+	pendingTypes := s.state.GetPendingTypes()
+	for _, configType := range pendingTypes {
+		config, err := s.state.GetCurrent(configType)
+		if err != nil {
+			v.CheckMsg(err, fmt.Sprintf("failed to get %s config", configType))
+			continue
+		}
+
+		switch configType {
+		case "interfaces":
+			if ifacesConfig, ok := config.(*types.InterfacesConfig); ok {
+				for ifaceName, iface := range ifacesConfig.Interfaces {
+					if err := iface.Validate(); err != nil {
+						v.CheckMsg(err, fmt.Sprintf("interface %s", ifaceName))
+					}
+				}
+			}
+
+		case "routes":
+			if routesConfig, ok := config.(*types.RoutesConfig); ok {
+				for _, route := range routesConfig.Routes {
+					if err := route.Validate(); err != nil {
+						v.Check(err) // Route.Validate() already includes route name in context
+					}
+				}
+			}
+
+		default:
+			// Plugin config - call plugin's ValidateConfig RPC method
+			plugin, exists := s.registry.Get(configType)
+			if !exists {
+				// If plugin not loaded, skip validation (might be disabled)
+				logger.Debug("Skipping validation for unloaded plugin",
+					logger.Field{Key: "namespace", Value: configType})
+				continue
+			}
+
+			// Call plugin's ValidateConfig method
+			if err := plugin.ValidateConfig(config); err != nil {
+				v.CheckMsg(err, fmt.Sprintf("%s plugin", configType))
+			}
+		}
+	}
+
+	return v.Error()
+}
+
 func (s *Server) handleCommit() Response {
+	// Validate all pending configs before committing
+	if err := s.validatePending(); err != nil {
+		return Response{
+			Success: false,
+			Error:   fmt.Sprintf("validation failed:\n%v", err),
+		}
+	}
+
 	// Get list of pending types before committing
 	pendingTypes := s.state.GetPendingTypes()
 	if len(pendingTypes) == 0 {
@@ -644,6 +704,9 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 	interfaces := s.state.GetCommittedInterfaces()
 	orderedNames := orderInterfaces(interfaces.Interfaces)
 
+	// Add interfaces to appliedSteps BEFORE applying, so rollback will restore them if any interface fails
+	appliedSteps = append(appliedSteps, "interfaces")
+
 	for _, name := range orderedNames {
 		iface := interfaces.Interfaces[name]
 		if err := system.ApplyInterfaceConfig(name, iface); err != nil {
@@ -658,7 +721,6 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 			return fmt.Errorf("interface %s: %w", name, err)
 		}
 	}
-	appliedSteps = append(appliedSteps, "interfaces")
 
 	// Step 3: Apply plugin configurations
 	for _, namespace := range s.registry.List() {

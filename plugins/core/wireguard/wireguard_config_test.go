@@ -12,8 +12,10 @@
 package main
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNetmaskToCIDR(t *testing.T) {
@@ -38,9 +40,7 @@ func TestNetmaskToCIDR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := NetmaskToCIDR(tt.netmask)
-			if got != tt.want {
-				t.Errorf("NetmaskToCIDR(%q) = %q, want %q", tt.netmask, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "NetmaskToCIDR(%q)", tt.netmask)
 		})
 	}
 }
@@ -93,19 +93,17 @@ func TestStringSlicesEqual(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := StringSlicesEqual(tt.a, tt.b)
-			if got != tt.want {
-				t.Errorf("StringSlicesEqual(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "StringSlicesEqual(%v, %v)", tt.a, tt.b)
 		})
 	}
 }
 
 func TestBuildPeerArgs(t *testing.T) {
 	tests := []struct {
-		name          string
-		deviceName    string
-		peer          WireGuardPeer
-		wantArgs      []string
+		name           string
+		deviceName     string
+		peer           WireGuardPeer
+		wantArgs       []string
 		wantNeedsStdin bool
 	}{
 		{
@@ -118,7 +116,7 @@ func TestBuildPeerArgs(t *testing.T) {
 				AllowedIPs:          []string{"0.0.0.0/0"},
 				PersistentKeepalive: 25,
 			},
-			wantArgs:      []string{"set", "wg0", "peer", "abcd1234efgh5678ijkl90mnopqr==AAAABBBBCCCC", "preshared-key", "/dev/stdin", "endpoint", "vpn.example.com:51820", "allowed-ips", "0.0.0.0/0", "persistent-keepalive", "25"},
+			wantArgs:       []string{"set", "wg0", "peer", "abcd1234efgh5678ijkl90mnopqr==AAAABBBBCCCC", "preshared-key", "/dev/stdin", "endpoint", "vpn.example.com:51820", "allowed-ips", "0.0.0.0/0", "persistent-keepalive", "25"},
 			wantNeedsStdin: true,
 		},
 		{
@@ -129,7 +127,7 @@ func TestBuildPeerArgs(t *testing.T) {
 				Endpoint:   "vpn.example.com:51820",
 				AllowedIPs: []string{"10.0.0.0/8", "192.168.0.0/16"},
 			},
-			wantArgs:      []string{"set", "wg0", "peer", "abcd1234efgh5678ijkl90mnopqr==AAAABBBBCCCC", "endpoint", "vpn.example.com:51820", "allowed-ips", "10.0.0.0/8,192.168.0.0/16"},
+			wantArgs:       []string{"set", "wg0", "peer", "abcd1234efgh5678ijkl90mnopqr==AAAABBBBCCCC", "endpoint", "vpn.example.com:51820", "allowed-ips", "10.0.0.0/8,192.168.0.0/16"},
 			wantNeedsStdin: false,
 		},
 		{
@@ -139,7 +137,7 @@ func TestBuildPeerArgs(t *testing.T) {
 				PublicKey:  "xyz789==",
 				AllowedIPs: []string{"10.0.0.1/32"},
 			},
-			wantArgs:      []string{"set", "wg-client", "peer", "xyz789==", "allowed-ips", "10.0.0.1/32"},
+			wantArgs:       []string{"set", "wg-client", "peer", "xyz789==", "allowed-ips", "10.0.0.1/32"},
 			wantNeedsStdin: false,
 		},
 		{
@@ -150,7 +148,7 @@ func TestBuildPeerArgs(t *testing.T) {
 				AllowedIPs:          []string{"192.168.1.0/24"},
 				PersistentKeepalive: 30,
 			},
-			wantArgs:      []string{"set", "wg0", "peer", "pubkey123==", "allowed-ips", "192.168.1.0/24", "persistent-keepalive", "30"},
+			wantArgs:       []string{"set", "wg0", "peer", "pubkey123==", "allowed-ips", "192.168.1.0/24", "persistent-keepalive", "30"},
 			wantNeedsStdin: false,
 		},
 	}
@@ -159,22 +157,8 @@ func TestBuildPeerArgs(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			gotArgs, gotNeedsStdin := BuildPeerArgs(tt.deviceName, tt.peer)
 
-			if gotNeedsStdin != tt.wantNeedsStdin {
-				t.Errorf("BuildPeerArgs() needsStdin = %v, want %v", gotNeedsStdin, tt.wantNeedsStdin)
-			}
-
-			if len(gotArgs) != len(tt.wantArgs) {
-				t.Errorf("BuildPeerArgs() args length = %d, want %d", len(gotArgs), len(tt.wantArgs))
-				t.Errorf("Got:  %v", gotArgs)
-				t.Errorf("Want: %v", tt.wantArgs)
-				return
-			}
-
-			for i := range gotArgs {
-				if gotArgs[i] != tt.wantArgs[i] {
-					t.Errorf("BuildPeerArgs() arg[%d] = %q, want %q", i, gotArgs[i], tt.wantArgs[i])
-				}
-			}
+			assert.Equal(t, tt.wantNeedsStdin, gotNeedsStdin, "BuildPeerArgs() needsStdin")
+			assert.Equal(t, tt.wantArgs, gotArgs, "BuildPeerArgs() args")
 		})
 	}
 }
@@ -477,6 +461,38 @@ func TestValidateVPNConfig(t *testing.T) {
 			wantError:  true,
 			errContain: "invalid persistent_keepalive",
 		},
+		{
+			name: "listen port out of range negative",
+			config: &VPNConfig{
+				Interfaces: map[string]VPNInterface{
+					"wg0": {
+						DeviceName: "wg0",
+						PrivateKey: "key",
+						Address:    "10.0.0.1",
+						Netmask:    "255.255.255.0",
+						ListenPort: -1,
+					},
+				},
+			},
+			wantError:  true,
+			errContain: "invalid listen port",
+		},
+		{
+			name: "listen port exceeds maximum",
+			config: &VPNConfig{
+				Interfaces: map[string]VPNInterface{
+					"wg0": {
+						DeviceName: "wg0",
+						PrivateKey: "key",
+						Address:    "10.0.0.1",
+						Netmask:    "255.255.255.0",
+						ListenPort: 99999,
+					},
+				},
+			},
+			wantError:  true,
+			errContain: "invalid listen port",
+		},
 	}
 
 	for _, tt := range tests {
@@ -484,16 +500,12 @@ func TestValidateVPNConfig(t *testing.T) {
 			err := ValidateVPNConfig(tt.config)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidateVPNConfig() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidateVPNConfig() error = %q, want to contain %q", err.Error(), tt.errContain)
+				require.Error(t, err, "ValidateVPNConfig() expected error")
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
 				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidateVPNConfig() unexpected error: %v", err)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -529,9 +541,7 @@ func TestFormatCIDR(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := FormatCIDR(tt.ipAddr, tt.netmask)
-			if got != tt.want {
-				t.Errorf("FormatCIDR(%q, %q) = %q, want %q", tt.ipAddr, tt.netmask, got, tt.want)
-			}
+			assert.Equal(t, tt.want, got, "FormatCIDR(%q, %q)", tt.ipAddr, tt.netmask)
 		})
 	}
 }

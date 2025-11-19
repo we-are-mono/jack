@@ -12,6 +12,12 @@
 // Package dnsmasq implements DHCP and DNS services using dnsmasq.
 package main
 
+import (
+	"fmt"
+
+	"github.com/we-are-mono/jack/validation"
+)
+
 // DHCPConfig represents the DHCP server configuration (plugin-agnostic)
 type DHCPConfig struct {
 	Version      string              `json:"version"`
@@ -150,4 +156,176 @@ type PTRRecord struct {
 	Name    string `json:"name"`
 	TTL     int    `json:"ttl,omitempty"`
 	Comment string `json:"comment,omitempty"`
+}
+
+// Validate checks if the DHCPConfig is valid.
+func (dc *DHCPConfig) Validate() error {
+	v := validation.NewCollector()
+
+	// Validate each pool
+	for poolName, pool := range dc.DHCPPools {
+		if err := pool.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("DHCP pool %s", poolName))
+		}
+	}
+
+	// Check for overlapping IP ranges on the same interface
+	for poolName1, pool1 := range dc.DHCPPools {
+		for poolName2, pool2 := range dc.DHCPPools {
+			// Skip comparing pool with itself
+			if poolName1 == poolName2 {
+				continue
+			}
+
+			// Only check pools on the same interface
+			if pool1.Interface != pool2.Interface {
+				continue
+			}
+
+			// Check if ranges overlap
+			// Pool range is [Start, Start + Limit - 1]
+			end1 := pool1.Start + pool1.Limit - 1
+			end2 := pool2.Start + pool2.Limit - 1
+
+			// Ranges overlap if: start1 <= end2 && start2 <= end1
+			if pool1.Start <= end2 && pool2.Start <= end1 {
+				v.Check(fmt.Errorf("DHCP pools %s and %s have overlapping IP ranges on interface %s",
+					poolName1, poolName2, pool1.Interface))
+			}
+		}
+	}
+
+	// Validate static leases
+	for idx, lease := range dc.StaticLeases {
+		if err := lease.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("static lease %d", idx))
+		}
+	}
+
+	return v.Error()
+}
+
+// Validate checks if the DHCPPool configuration is valid.
+func (dp *DHCPPool) Validate() error {
+	v := validation.NewCollector()
+
+	if dp.Start <= 0 {
+		v.Check(fmt.Errorf("start address must be positive"))
+	}
+
+	if dp.Limit <= 0 {
+		v.Check(fmt.Errorf("limit must be positive"))
+	}
+
+	if dp.Limit > 65536 {
+		v.Check(fmt.Errorf("limit %d exceeds reasonable maximum (65536)", dp.Limit))
+	}
+
+	if dp.Interface == "" {
+		v.Check(fmt.Errorf("interface not specified"))
+	}
+
+	for _, dns := range dp.DNS {
+		v.CheckMsg(validation.ValidateIP(dns), fmt.Sprintf("invalid DNS server %s", dns))
+	}
+
+	if dp.Domain != "" {
+		v.CheckMsg(validation.ValidateDomain(dp.Domain), "invalid domain")
+	}
+
+	return v.Error()
+}
+
+// Validate checks if the StaticLease is valid.
+func (sl *StaticLease) Validate() error {
+	v := validation.NewCollector()
+
+	v.CheckMsg(validation.ValidateMAC(sl.MAC), "invalid MAC address")
+	v.CheckMsg(validation.ValidateIP(sl.IP), "invalid IP address")
+
+	return v.Error()
+}
+
+// Validate checks if the DNSConfig is valid.
+func (dn *DNSConfig) Validate() error {
+	v := validation.NewCollector().WithContext("DNS server")
+
+	if dn.Server.Port > 0 {
+		v.CheckMsg(validation.ValidatePort(dn.Server.Port), "invalid port")
+	}
+
+	if dn.Server.Domain != "" {
+		v.CheckMsg(validation.ValidateDomain(dn.Server.Domain), "invalid domain")
+	}
+
+	for _, upstream := range dn.Server.Upstreams {
+		v.CheckMsg(validation.ValidateIP(upstream), fmt.Sprintf("invalid upstream %s", upstream))
+	}
+
+	// Validate DNS records
+	for idx, record := range dn.Records.ARecords {
+		if err := record.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("A record %d", idx))
+		}
+	}
+
+	for idx, record := range dn.Records.AAAARecords {
+		if err := record.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("AAAA record %d", idx))
+		}
+	}
+
+	for idx, record := range dn.Records.CNAMERecords {
+		if err := record.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("CNAME record %d", idx))
+		}
+	}
+
+	for idx, record := range dn.Records.PTRRecords {
+		if err := record.Validate(); err != nil {
+			v.CheckMsg(err, fmt.Sprintf("PTR record %d", idx))
+		}
+	}
+
+	return v.Error()
+}
+
+// Validate checks if the ARecord is valid.
+func (ar *ARecord) Validate() error {
+	v := validation.NewCollector()
+
+	v.CheckMsg(validation.ValidateDomain(ar.Name), "invalid name")
+	v.CheckMsg(validation.ValidateIP(ar.IP), "invalid IP")
+
+	return v.Error()
+}
+
+// Validate checks if the AAAARecord is valid.
+func (ar *AAAARecord) Validate() error {
+	v := validation.NewCollector()
+
+	v.CheckMsg(validation.ValidateDomain(ar.Name), "invalid name")
+	v.CheckMsg(validation.ValidateIP(ar.IP), "invalid IP")
+
+	return v.Error()
+}
+
+// Validate checks if the CNAMERecord is valid.
+func (cr *CNAMERecord) Validate() error {
+	v := validation.NewCollector()
+
+	v.CheckMsg(validation.ValidateDomain(cr.CNAME), "invalid CNAME")
+	v.CheckMsg(validation.ValidateDomain(cr.Target), "invalid target")
+
+	return v.Error()
+}
+
+// Validate checks if the PTRRecord is valid.
+func (ptr *PTRRecord) Validate() error {
+	v := validation.NewCollector()
+
+	v.CheckMsg(validation.ValidateIP(ptr.IP), "invalid IP")
+	v.CheckMsg(validation.ValidateDomain(ptr.Name), "invalid name")
+
+	return v.Error()
 }

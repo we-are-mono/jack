@@ -14,9 +14,10 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/we-are-mono/jack/daemon"
 )
 
@@ -106,23 +107,13 @@ func TestParseSetArgs(t *testing.T) {
 			path, value, err := parseSetArgs(tt.args)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("parseSetArgs() expected error, got nil")
-				}
+				assert.Error(t, err, "parseSetArgs() expected error, got nil")
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("parseSetArgs() unexpected error: %v", err)
-			}
-
-			if path != tt.wantPath {
-				t.Errorf("parseSetArgs() path = %q, want %q", path, tt.wantPath)
-			}
-
-			if value != tt.wantValue {
-				t.Errorf("parseSetArgs() value = %v (%T), want %v (%T)", value, value, tt.wantValue, tt.wantValue)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPath, path)
+			assert.Equal(t, tt.wantValue, value)
 		})
 	}
 }
@@ -198,9 +189,7 @@ func TestExecuteSet(t *testing.T) {
 						return nil, tt.mockError
 					}
 					// Verify the request is constructed correctly
-					if req.Command != "set" {
-						t.Errorf("expected command 'set', got %q", req.Command)
-					}
+					assert.Equal(t, "set", req.Command)
 					return tt.mockResponse, nil
 				},
 			}
@@ -208,21 +197,15 @@ func TestExecuteSet(t *testing.T) {
 			err := executeSet(&buf, mockCli, tt.args)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("executeSet() expected error, got nil")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("executeSet() error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				require.Error(t, err, "executeSet() expected error, got nil")
+				if tt.wantErrContain != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContain)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("executeSet() unexpected error: %v", err)
-			}
-
-			if buf.String() != tt.wantOutput {
-				t.Errorf("executeSet() output = %q, want %q", buf.String(), tt.wantOutput)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOutput, buf.String())
 		})
 	}
 }
@@ -261,23 +244,11 @@ func TestExecuteSet_RequestFields(t *testing.T) {
 			}
 
 			err := executeSet(&buf, mockCli, tt.args)
-			if err != nil {
-				t.Fatalf("executeSet() unexpected error: %v", err)
-			}
+			require.NoError(t, err)
 
-			if capturedReq.Command != "set" {
-				t.Errorf("Request.Command = %q, want %q", capturedReq.Command, "set")
-			}
-
-			if capturedReq.Path != tt.wantPath {
-				t.Errorf("Request.Path = %q, want %q", capturedReq.Path, tt.wantPath)
-			}
-
-			if capturedReq.Value != tt.wantValue {
-				t.Errorf("Request.Value = %v (%T), want %v (%T)",
-					capturedReq.Value, capturedReq.Value,
-					tt.wantValue, tt.wantValue)
-			}
+			assert.Equal(t, "set", capturedReq.Command)
+			assert.Equal(t, tt.wantPath, capturedReq.Path)
+			assert.Equal(t, tt.wantValue, capturedReq.Value)
 		})
 	}
 }

@@ -250,11 +250,3 @@ func Error(msg string, fields ...Field) {
 		std.Error(msg, fields...)
 	}
 }
-
-// With creates a child logger with preset fields using the global logger
-func With(fields ...Field) Logger {
-	if std != nil {
-		return std.With(fields...)
-	}
-	return nil
-}

@@ -14,6 +14,8 @@ package daemon
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/we-are-mono/jack/types"
 )
 
@@ -59,14 +61,11 @@ func TestParseConfigType(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := ParseConfigType(tt.path)
-			if tt.wantError && err == nil {
-				t.Errorf("ParseConfigType() expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("ParseConfigType() unexpected error: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("ParseConfigType() = %v, want %v", got, tt.want)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+				assert.Equal(t, tt.want, got)
 			}
 		})
 	}
@@ -223,11 +222,10 @@ func TestSetValue_Interfaces(t *testing.T) {
 			}
 
 			err := SetValue(testConfig, tt.path, tt.value)
-			if tt.wantError && err == nil {
-				t.Errorf("SetValue() expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("SetValue() unexpected error: %v", err)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
 			}
 			if !tt.wantError && tt.check != nil {
 				tt.check(t, testConfig)
@@ -401,11 +399,10 @@ func TestSetValue_Routes(t *testing.T) {
 			}
 
 			err := SetValue(testConfig, tt.path, tt.value)
-			if tt.wantError && err == nil {
-				t.Errorf("SetValue() expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("SetValue() unexpected error: %v", err)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
 			}
 			if !tt.wantError && tt.check != nil {
 				tt.check(t, testConfig)
@@ -480,11 +477,10 @@ func TestSetValue_Generic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			err := SetValue(tt.config, tt.path, tt.value)
-			if tt.wantError && err == nil {
-				t.Errorf("SetValue() expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("SetValue() unexpected error: %v", err)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
 			}
 			if !tt.wantError && tt.check != nil {
 				tt.check(t, tt.config)
@@ -598,20 +594,17 @@ func TestGetValue_Interfaces(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := GetValue(config, tt.path)
-			if tt.wantError && err == nil {
-				t.Errorf("GetValue() expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("GetValue() unexpected error: %v", err)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
 			}
 			if !tt.wantError {
 				// For complex types, just check they're not nil
 				if tt.path == "interfaces" || tt.path == "interfaces.br-lan" {
-					if got == nil {
-						t.Errorf("GetValue() returned nil")
-					}
-				} else if got != tt.want {
-					t.Errorf("GetValue() = %v, want %v", got, tt.want)
+					assert.NotNil(t, got, "GetValue() returned nil")
+				} else {
+					assert.Equal(t, tt.want, got)
 				}
 			}
 		})
@@ -709,20 +702,17 @@ func TestGetValue_Routes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := GetValue(config, tt.path)
-			if tt.wantError && err == nil {
-				t.Errorf("GetValue() expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("GetValue() unexpected error: %v", err)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
 			}
 			if !tt.wantError {
 				// For complex types, just check they're not nil
 				if tt.path == "routes.default" {
-					if got == nil {
-						t.Errorf("GetValue() returned nil")
-					}
-				} else if got != tt.want {
-					t.Errorf("GetValue() = %v, want %v", got, tt.want)
+					assert.NotNil(t, got, "GetValue() returned nil")
+				} else {
+					assert.Equal(t, tt.want, got)
 				}
 			}
 		})
@@ -778,11 +768,10 @@ func TestGetValue_Generic(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := GetValue(config, tt.path)
-			if tt.wantError && err == nil {
-				t.Errorf("GetValue() expected error but got none")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("GetValue() unexpected error: %v", err)
+			if tt.wantError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
 			}
 			if !tt.wantError && tt.want != nil && got != tt.want {
 				t.Errorf("GetValue() = %v, want %v", got, tt.want)
@@ -795,28 +784,20 @@ func TestSetValue_WrongConfigType(t *testing.T) {
 	// Test with wrong config type for interfaces path
 	wrongConfig := map[string]interface{}{}
 	err := SetValue(wrongConfig, "interfaces.br-lan.enabled", true)
-	if err == nil {
-		t.Errorf("SetValue() expected error for wrong config type")
-	}
+	require.Error(t, err, "SetValue() expected error for wrong config type")
 
 	// Test with wrong config type for routes path
 	err = SetValue(wrongConfig, "routes.default.enabled", true)
-	if err == nil {
-		t.Errorf("SetValue() expected error for wrong config type")
-	}
+	require.Error(t, err, "SetValue() expected error for wrong config type")
 }
 
 func TestGetValue_WrongConfigType(t *testing.T) {
 	// Test with wrong config type for interfaces path
 	wrongConfig := map[string]interface{}{}
 	_, err := GetValue(wrongConfig, "interfaces.br-lan.enabled")
-	if err == nil {
-		t.Errorf("GetValue() expected error for wrong config type")
-	}
+	require.Error(t, err, "GetValue() expected error for wrong config type")
 
 	// Test with wrong config type for routes path
 	_, err = GetValue(wrongConfig, "routes.default.enabled")
-	if err == nil {
-		t.Errorf("GetValue() expected error for wrong config type")
-	}
+	require.Error(t, err, "GetValue() expected error for wrong config type")
 }

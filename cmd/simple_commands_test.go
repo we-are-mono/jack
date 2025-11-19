@@ -14,9 +14,10 @@ package cmd
 import (
 	"bytes"
 	"fmt"
-	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/we-are-mono/jack/daemon"
 )
 
@@ -63,9 +64,7 @@ func TestExecuteApply(t *testing.T) {
 					if tt.mockError != nil {
 						return nil, tt.mockError
 					}
-					if req.Command != "apply" {
-						t.Errorf("expected command 'apply', got %q", req.Command)
-					}
+					assert.Equal(t, "apply", req.Command)
 					return tt.mockResponse, nil
 				},
 			}
@@ -73,21 +72,15 @@ func TestExecuteApply(t *testing.T) {
 			err := executeApply(&buf, mockCli)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("executeApply() expected error, got nil")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("executeApply() error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				require.Error(t, err, "executeApply() expected error, got nil")
+				if tt.wantErrContain != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContain)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("executeApply() unexpected error: %v", err)
-			}
-
-			if buf.String() != tt.wantOutput {
-				t.Errorf("executeApply() output = %q, want %q", buf.String(), tt.wantOutput)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOutput, buf.String())
 		})
 	}
 }
@@ -135,9 +128,7 @@ func TestExecuteCommit(t *testing.T) {
 					if tt.mockError != nil {
 						return nil, tt.mockError
 					}
-					if req.Command != "commit" {
-						t.Errorf("expected command 'commit', got %q", req.Command)
-					}
+					assert.Equal(t, "commit", req.Command)
 					return tt.mockResponse, nil
 				},
 			}
@@ -145,21 +136,15 @@ func TestExecuteCommit(t *testing.T) {
 			err := executeCommit(&buf, mockCli)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("executeCommit() expected error, got nil")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("executeCommit() error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				require.Error(t, err, "executeCommit() expected error, got nil")
+				if tt.wantErrContain != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContain)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("executeCommit() unexpected error: %v", err)
-			}
-
-			if buf.String() != tt.wantOutput {
-				t.Errorf("executeCommit() output = %q, want %q", buf.String(), tt.wantOutput)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOutput, buf.String())
 		})
 	}
 }
@@ -207,9 +192,7 @@ func TestExecuteRevert(t *testing.T) {
 					if tt.mockError != nil {
 						return nil, tt.mockError
 					}
-					if req.Command != "revert" {
-						t.Errorf("expected command 'revert', got %q", req.Command)
-					}
+					assert.Equal(t, "revert", req.Command)
 					return tt.mockResponse, nil
 				},
 			}
@@ -217,21 +200,15 @@ func TestExecuteRevert(t *testing.T) {
 			err := executeRevert(&buf, mockCli)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("executeRevert() expected error, got nil")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("executeRevert() error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				require.Error(t, err, "executeRevert() expected error, got nil")
+				if tt.wantErrContain != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContain)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("executeRevert() unexpected error: %v", err)
-			}
-
-			if buf.String() != tt.wantOutput {
-				t.Errorf("executeRevert() output = %q, want %q", buf.String(), tt.wantOutput)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOutput, buf.String())
 		})
 	}
 }
@@ -287,9 +264,7 @@ func TestExecuteDiff(t *testing.T) {
 					if tt.mockError != nil {
 						return nil, tt.mockError
 					}
-					if req.Command != "diff" {
-						t.Errorf("expected command 'diff', got %q", req.Command)
-					}
+					assert.Equal(t, "diff", req.Command)
 					return tt.mockResponse, nil
 				},
 			}
@@ -297,21 +272,15 @@ func TestExecuteDiff(t *testing.T) {
 			err := executeDiff(&buf, mockCli)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("executeDiff() expected error, got nil")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("executeDiff() error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				require.Error(t, err, "executeDiff() expected error, got nil")
+				if tt.wantErrContain != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContain)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("executeDiff() unexpected error: %v", err)
-			}
-
-			if buf.String() != tt.wantOutput {
-				t.Errorf("executeDiff() output = %q, want %q", buf.String(), tt.wantOutput)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantOutput, buf.String())
 		})
 	}
 }

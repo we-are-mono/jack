@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/we-are-mono/jack/daemon"
 )
 
@@ -64,19 +66,12 @@ func TestParseGetPath(t *testing.T) {
 			path, err := parseGetPath(tt.args)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("parseGetPath() expected error, got nil")
-				}
+				assert.Error(t, err, "parseGetPath() expected error, got nil")
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("parseGetPath() unexpected error: %v", err)
-			}
-
-			if path != tt.wantPath {
-				t.Errorf("parseGetPath() path = %q, want %q", path, tt.wantPath)
-			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantPath, path)
 		})
 	}
 }
@@ -178,9 +173,7 @@ func TestExecuteGet(t *testing.T) {
 						return nil, tt.mockError
 					}
 					// Verify the request is constructed correctly
-					if req.Command != "get" {
-						t.Errorf("expected command 'get', got %q", req.Command)
-					}
+					assert.Equal(t, "get", req.Command)
 					return tt.mockResponse, nil
 				},
 			}
@@ -188,23 +181,18 @@ func TestExecuteGet(t *testing.T) {
 			err := executeGet(&buf, mockCli, tt.args)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("executeGet() expected error, got nil")
-				} else if tt.wantErrContain != "" && !strings.Contains(err.Error(), tt.wantErrContain) {
-					t.Errorf("executeGet() error = %q, want to contain %q", err.Error(), tt.wantErrContain)
+				require.Error(t, err, "executeGet() expected error, got nil")
+				if tt.wantErrContain != "" {
+					assert.Contains(t, err.Error(), tt.wantErrContain)
 				}
 				return
 			}
 
-			if err != nil {
-				t.Fatalf("executeGet() unexpected error: %v", err)
-			}
+			require.NoError(t, err)
 
 			// Verify JSON output
 			output := strings.TrimSpace(buf.String())
-			if output != tt.wantOutputJSON {
-				t.Errorf("executeGet() output =\n%s\nwant:\n%s", output, tt.wantOutputJSON)
-			}
+			assert.Equal(t, tt.wantOutputJSON, output)
 		})
 	}
 }
@@ -248,17 +236,10 @@ func TestExecuteGet_RequestFields(t *testing.T) {
 			}
 
 			err := executeGet(&buf, mockCli, tt.args)
-			if err != nil {
-				t.Fatalf("executeGet() unexpected error: %v", err)
-			}
+			require.NoError(t, err)
 
-			if capturedReq.Command != "get" {
-				t.Errorf("Request.Command = %q, want %q", capturedReq.Command, "get")
-			}
-
-			if capturedReq.Path != tt.wantPath {
-				t.Errorf("Request.Path = %q, want %q", capturedReq.Path, tt.wantPath)
-			}
+			assert.Equal(t, "get", capturedReq.Command)
+			assert.Equal(t, tt.wantPath, capturedReq.Path)
 		})
 	}
 }

@@ -12,297 +12,11 @@
 package main
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
-
-func TestValidateLEDConfig(t *testing.T) {
-	tests := []struct {
-		name       string
-		config     *LEDConfig
-		wantError  bool
-		errContain string
-	}{
-		{
-			name: "valid config with single LED",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {
-						Brightness: 255,
-						Trigger:    "none",
-					},
-				},
-			},
-			wantError: false,
-		},
-		{
-			name: "valid config with multiple LEDs",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {Brightness: 255, Trigger: "heartbeat"},
-					"status:red":   {Brightness: 0, Trigger: "none"},
-					"status:blue":  {Brightness: 128, Trigger: "timer", DelayOn: 500, DelayOff: 500},
-				},
-			},
-			wantError: false,
-		},
-		{
-			name:       "nil config",
-			config:     nil,
-			wantError:  true,
-			errContain: "config is nil",
-		},
-		{
-			name: "no LEDs defined",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{},
-			},
-			wantError:  true,
-			errContain: "no LEDs defined",
-		},
-		{
-			name: "LED with negative brightness",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {Brightness: -1},
-				},
-			},
-			wantError:  true,
-			errContain: "brightness cannot be negative",
-		},
-		{
-			name: "LED with invalid trigger",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {Brightness: 255, Trigger: "invalid-trigger"},
-				},
-			},
-			wantError:  true,
-			errContain: "invalid trigger",
-		},
-		{
-			name: "timer trigger with negative delay_on",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {Brightness: 255, Trigger: "timer", DelayOn: -1, DelayOff: 500},
-				},
-			},
-			wantError:  true,
-			errContain: "delay_on cannot be negative",
-		},
-		{
-			name: "timer trigger with negative delay_off",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {Brightness: 255, Trigger: "timer", DelayOn: 500, DelayOff: -1},
-				},
-			},
-			wantError:  true,
-			errContain: "delay_off cannot be negative",
-		},
-		{
-			name: "pattern trigger without pattern",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {Brightness: 255, Trigger: "pattern"},
-				},
-			},
-			wantError:  true,
-			errContain: "pattern trigger requires pattern to be set",
-		},
-		{
-			name: "netdev trigger without device_name",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {Brightness: 255, Trigger: "netdev"},
-				},
-			},
-			wantError:  true,
-			errContain: "netdev trigger requires device_name to be set",
-		},
-		{
-			name: "netdev trigger with invalid mode",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {
-						Brightness: 255,
-						Trigger:    "netdev",
-						DeviceName: "br-lan",
-						Mode:       "invalid-mode",
-					},
-				},
-			},
-			wantError:  true,
-			errContain: "invalid netdev mode flag",
-		},
-		{
-			name: "valid netdev trigger",
-			config: &LEDConfig{
-				LEDs: map[string]LEDSettings{
-					"status:green": {
-						Brightness: 255,
-						Trigger:    "netdev",
-						DeviceName: "br-lan",
-						Mode:       "link tx rx",
-					},
-				},
-			},
-			wantError: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateLEDConfig(tt.config)
-
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidateLEDConfig() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidateLEDConfig() error = %q, want to contain %q", err.Error(), tt.errContain)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidateLEDConfig() unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestValidateLEDSettings(t *testing.T) {
-	tests := []struct {
-		name       string
-		ledName    string
-		settings   LEDSettings
-		wantError  bool
-		errContain string
-	}{
-		{
-			name:      "valid settings with none trigger",
-			ledName:   "status:green",
-			settings:  LEDSettings{Brightness: 255, Trigger: "none"},
-			wantError: false,
-		},
-		{
-			name:      "valid settings with heartbeat trigger",
-			ledName:   "status:green",
-			settings:  LEDSettings{Brightness: 128, Trigger: "heartbeat"},
-			wantError: false,
-		},
-		{
-			name:      "valid settings with timer trigger",
-			ledName:   "status:green",
-			settings:  LEDSettings{Brightness: 255, Trigger: "timer", DelayOn: 500, DelayOff: 500},
-			wantError: false,
-		},
-		{
-			name:       "negative brightness",
-			ledName:    "status:green",
-			settings:   LEDSettings{Brightness: -10},
-			wantError:  true,
-			errContain: "brightness cannot be negative",
-		},
-		{
-			name:       "invalid trigger",
-			ledName:    "status:green",
-			settings:   LEDSettings{Brightness: 255, Trigger: "unknown"},
-			wantError:  true,
-			errContain: "invalid trigger",
-		},
-		{
-			name:       "timer with negative delay_on",
-			ledName:    "status:green",
-			settings:   LEDSettings{Brightness: 255, Trigger: "timer", DelayOn: -100, DelayOff: 500},
-			wantError:  true,
-			errContain: "delay_on cannot be negative",
-		},
-		{
-			name:       "timer with negative delay_off",
-			ledName:    "status:green",
-			settings:   LEDSettings{Brightness: 255, Trigger: "timer", DelayOn: 500, DelayOff: -100},
-			wantError:  true,
-			errContain: "delay_off cannot be negative",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateLEDSettings(tt.ledName, tt.settings)
-
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidateLEDSettings() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidateLEDSettings() error = %q, want to contain %q", err.Error(), tt.errContain)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidateLEDSettings() unexpected error: %v", err)
-			}
-		})
-	}
-}
-
-func TestValidatePattern(t *testing.T) {
-	tests := []struct {
-		name       string
-		pattern    string
-		wantError  bool
-		errContain string
-	}{
-		{
-			name:      "valid pattern with one pair",
-			pattern:   "255 1000",
-			wantError: false,
-		},
-		{
-			name:      "valid pattern with multiple pairs",
-			pattern:   "255 500 0 500 128 1000",
-			wantError: false,
-		},
-		{
-			name:       "empty pattern",
-			pattern:    "",
-			wantError:  true,
-			errContain: "pattern cannot be empty",
-		},
-		{
-			name:       "odd number of values",
-			pattern:    "255 500 0",
-			wantError:  true,
-			errContain: "even number of values",
-		},
-		{
-			name:       "single value",
-			pattern:    "255",
-			wantError:  true,
-			errContain: "even number of values",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidatePattern(tt.pattern)
-
-			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidatePattern() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidatePattern() error = %q, want to contain %q", err.Error(), tt.errContain)
-				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidatePattern() unexpected error: %v", err)
-			}
-		})
-	}
-}
 
 func TestValidateNetdevMode(t *testing.T) {
 	tests := []struct {
@@ -350,16 +64,12 @@ func TestValidateNetdevMode(t *testing.T) {
 			err := ValidateNetdevMode(tt.mode)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidateNetdevMode() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidateNetdevMode() error = %q, want to contain %q", err.Error(), tt.errContain)
+				require.Error(t, err, "ValidateNetdevMode() expected error")
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
 				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidateNetdevMode() unexpected error: %v", err)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
@@ -406,9 +116,7 @@ func TestParseActiveTrigger(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ParseActiveTrigger(tt.content)
-			if result != tt.want {
-				t.Errorf("ParseActiveTrigger(%q) = %q, want %q", tt.content, result, tt.want)
-			}
+			assert.Equal(t, tt.want, result, "ParseActiveTrigger(%q)", tt.content)
 		})
 	}
 }
@@ -444,19 +152,7 @@ func TestParseAvailableTriggers(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := ParseAvailableTriggers(tt.content)
-
-			if len(result) != len(tt.want) {
-				t.Errorf("ParseAvailableTriggers(%q) returned %d triggers, want %d",
-					tt.content, len(result), len(tt.want))
-				return
-			}
-
-			for i, trigger := range result {
-				if trigger != tt.want[i] {
-					t.Errorf("ParseAvailableTriggers(%q)[%d] = %q, want %q",
-						tt.content, i, trigger, tt.want[i])
-				}
-			}
+			assert.Equal(t, tt.want, result, "ParseAvailableTriggers(%q)", tt.content)
 		})
 	}
 }

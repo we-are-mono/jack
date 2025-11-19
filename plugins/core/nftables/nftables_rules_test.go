@@ -12,8 +12,10 @@
 package main
 
 import (
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestGeneratePortForwardDNATRule(t *testing.T) {
@@ -25,12 +27,12 @@ func TestGeneratePortForwardDNATRule(t *testing.T) {
 		{
 			name: "simple TCP port forward",
 			portFwd: PortForward{
-				Name:      "web",
-				Proto:     "tcp",
-				SrcDPort:  "80",
-				DestIP:    "192.168.1.100",
-				DestPort:  "8080",
-				Comment:   "Web server",
+				Name:     "web",
+				Proto:    "tcp",
+				SrcDPort: "80",
+				DestIP:   "192.168.1.100",
+				DestPort: "8080",
+				Comment:  "Web server",
 			},
 			wantContain: []string{"meta l4proto tcp", "th dport 80", "dnat to 192.168.1.100:8080", "comment \"Web server\""},
 		},
@@ -73,15 +75,11 @@ func TestGeneratePortForwardDNATRule(t *testing.T) {
 			result := GeneratePortForwardDNATRule(tt.portFwd)
 
 			for _, want := range tt.wantContain {
-				if !strings.Contains(result, want) {
-					t.Errorf("GeneratePortForwardDNATRule() = %q, want to contain %q", result, want)
-				}
+				assert.Contains(t, result, want, "GeneratePortForwardDNATRule()")
 			}
 
 			// Verify rule has counter
-			if !strings.Contains(result, "counter") {
-				t.Errorf("GeneratePortForwardDNATRule() = %q, want to contain 'counter'", result)
-			}
+			assert.Contains(t, result, "counter", "GeneratePortForwardDNATRule() should contain counter")
 		})
 	}
 }
@@ -129,9 +127,7 @@ func TestGeneratePortForwardFilterRule(t *testing.T) {
 			result := GeneratePortForwardFilterRule(tt.portFwd)
 
 			for _, want := range tt.wantContain {
-				if !strings.Contains(result, want) {
-					t.Errorf("GeneratePortForwardFilterRule() = %q, want to contain %q", result, want)
-				}
+				assert.Contains(t, result, want, "GeneratePortForwardFilterRule()")
 			}
 		})
 	}
@@ -205,111 +201,7 @@ func TestGenerateCustomRule(t *testing.T) {
 			result := GenerateCustomRule(tt.rule)
 
 			for _, want := range tt.wantContain {
-				if !strings.Contains(result, want) {
-					t.Errorf("GenerateCustomRule() = %q, want to contain %q", result, want)
-				}
-			}
-		})
-	}
-}
-
-func TestGenerateMasqueradeRule(t *testing.T) {
-	tests := []struct {
-		name  string
-		iface string
-		want  string
-	}{
-		{
-			name:  "masquerade on eth0",
-			iface: "eth0",
-			want:  "oifname eth0 masquerade",
-		},
-		{
-			name:  "masquerade on wg-proton",
-			iface: "wg-proton",
-			want:  "oifname wg-proton masquerade",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GenerateMasqueradeRule(tt.iface)
-			if result != tt.want {
-				t.Errorf("GenerateMasqueradeRule() = %q, want %q", result, tt.want)
-			}
-		})
-	}
-}
-
-func TestGenerateForwardingRule(t *testing.T) {
-	tests := []struct {
-		name     string
-		srcIface string
-		comment  string
-		want     string
-	}{
-		{
-			name:     "lan to wan",
-			srcIface: "br-lan",
-			comment:  "LAN->WAN",
-			want:     "iifname br-lan counter accept comment \"LAN->WAN\"",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GenerateForwardingRule(tt.srcIface, tt.comment)
-			if result != tt.want {
-				t.Errorf("GenerateForwardingRule() = %q, want %q", result, tt.want)
-			}
-		})
-	}
-}
-
-func TestGenerateZoneInputJumpRule(t *testing.T) {
-	result := GenerateZoneInputJumpRule("br-lan", "input_lan")
-	want := "iifname br-lan jump input_lan"
-	if result != want {
-		t.Errorf("GenerateZoneInputJumpRule() = %q, want %q", result, want)
-	}
-}
-
-func TestGenerateZoneForwardJumpRule(t *testing.T) {
-	result := GenerateZoneForwardJumpRule("eth0", "forward_wan")
-	want := "iifname eth0 jump forward_wan"
-	if result != want {
-		t.Errorf("GenerateZoneForwardJumpRule() = %q, want %q", result, want)
-	}
-}
-
-func TestGenerateDefaultPolicyRule(t *testing.T) {
-	tests := []struct {
-		name   string
-		policy string
-		want   string
-	}{
-		{
-			name:   "accept policy",
-			policy: "ACCEPT",
-			want:   "counter accept",
-		},
-		{
-			name:   "drop policy",
-			policy: "DROP",
-			want:   "counter drop",
-		},
-		{
-			name:   "lowercase policy",
-			policy: "reject",
-			want:   "counter reject",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := GenerateDefaultPolicyRule(tt.policy)
-			if result != tt.want {
-				t.Errorf("GenerateDefaultPolicyRule() = %q, want %q", result, tt.want)
+				assert.Contains(t, result, want, "GenerateCustomRule()")
 			}
 		})
 	}
@@ -317,9 +209,9 @@ func TestGenerateDefaultPolicyRule(t *testing.T) {
 
 func TestValidateFirewallConfig(t *testing.T) {
 	tests := []struct {
-		name      string
-		config    *FirewallConfig
-		wantError bool
+		name       string
+		config     *FirewallConfig
+		wantError  bool
 		errContain string
 	}{
 		{
@@ -507,16 +399,12 @@ func TestValidateFirewallConfig(t *testing.T) {
 			err := ValidateFirewallConfig(tt.config)
 
 			if tt.wantError {
-				if err == nil {
-					t.Errorf("ValidateFirewallConfig() expected error, got nil")
-				} else if tt.errContain != "" && !strings.Contains(err.Error(), tt.errContain) {
-					t.Errorf("ValidateFirewallConfig() error = %q, want to contain %q", err.Error(), tt.errContain)
+				require.Error(t, err, "ValidateFirewallConfig() expected error")
+				if tt.errContain != "" {
+					assert.Contains(t, err.Error(), tt.errContain)
 				}
-				return
-			}
-
-			if err != nil {
-				t.Errorf("ValidateFirewallConfig() unexpected error: %v", err)
+			} else {
+				require.NoError(t, err)
 			}
 		})
 	}
