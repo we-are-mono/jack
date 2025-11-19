@@ -280,3 +280,380 @@ func TestWireGuardPeerMarshaling(t *testing.T) {
 	assert.Len(t, decoded.AllowedIPs, 2)
 	assert.Equal(t, 25, decoded.PersistentKeepalive)
 }
+
+// ============================================================================
+// Validation Tests
+// ============================================================================
+
+// TestRoute_Validate tests Route validation
+func TestRoute_Validate(t *testing.T) {
+	tests := []struct {
+		name       string
+		route      Route
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "valid route",
+			route: Route{
+				Name:        "default",
+				Destination: "0.0.0.0/0",
+				Gateway:     "192.168.1.1",
+				Enabled:     true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid route without gateway",
+			route: Route{
+				Name:        "direct",
+				Destination: "192.168.1.0/24",
+				Interface:   "eth0",
+				Enabled:     true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid destination",
+			route: Route{
+				Name:        "bad",
+				Destination: "not-a-cidr",
+				Enabled:     true,
+			},
+			wantErr:    true,
+			errContain: "invalid destination",
+		},
+		{
+			name: "invalid gateway",
+			route: Route{
+				Name:        "bad",
+				Destination: "10.0.0.0/8",
+				Gateway:     "999.999.999.999",
+				Enabled:     true,
+			},
+			wantErr:    true,
+			errContain: "invalid gateway",
+		},
+		{
+			name: "negative metric",
+			route: Route{
+				Name:        "bad",
+				Destination: "10.0.0.0/8",
+				Metric:      -1,
+				Enabled:     true,
+			},
+			wantErr:    true,
+			errContain: "metric",
+		},
+		{
+			name: "invalid table ID",
+			route: Route{
+				Name:        "bad",
+				Destination: "10.0.0.0/8",
+				Table:       -1,
+				Enabled:     true,
+			},
+			wantErr:    true,
+			errContain: "table",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.route.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContain)
+				assert.Contains(t, err.Error(), "route "+tt.route.Name)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestInterface_Validate tests Interface validation
+func TestInterface_Validate(t *testing.T) {
+	tests := []struct {
+		name       string
+		iface      Interface
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "valid DHCP interface",
+			iface: Interface{
+				Type:     "physical",
+				Protocol: "dhcp",
+				Enabled:  true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid static interface",
+			iface: Interface{
+				Type:     "physical",
+				Protocol: "static",
+				IPAddr:   "192.168.1.10",
+				Netmask:  "255.255.255.0",
+				Gateway:  "192.168.1.1",
+				DNS:      []string{"8.8.8.8"},
+				Enabled:  true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid MTU",
+			iface: Interface{
+				Type:     "physical",
+				Protocol: "dhcp",
+				MTU:      67,
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "MTU",
+		},
+		{
+			name: "invalid IP address",
+			iface: Interface{
+				Type:     "physical",
+				Protocol: "static",
+				IPAddr:   "999.999.999.999",
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "invalid IP address",
+		},
+		{
+			name: "invalid netmask",
+			iface: Interface{
+				Type:     "physical",
+				Protocol: "static",
+				IPAddr:   "192.168.1.10",
+				Netmask:  "255.255.999.0",
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "netmask",
+		},
+		{
+			name: "invalid MAC",
+			iface: Interface{
+				Type:     "physical",
+				Protocol: "dhcp",
+				MAC:      "00:11:22:33:44:ZZ",
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "MAC",
+		},
+		{
+			name: "invalid VLAN ID",
+			iface: Interface{
+				Type:     "vlan",
+				Protocol: "dhcp",
+				VLANId:   5000,
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "VLAN",
+		},
+		{
+			name: "invalid DNS",
+			iface: Interface{
+				Type:     "physical",
+				Protocol: "dhcp",
+				DNS:      []string{"8.8.8.8", "bad-dns"},
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "invalid DNS server",
+		},
+		{
+			name: "invalid WireGuard port",
+			iface: Interface{
+				Type:         "wireguard",
+				Protocol:     "static",
+				WGListenPort: 70000,
+				Enabled:      true,
+			},
+			wantErr:    true,
+			errContain: "invalid WireGuard listen port",
+		},
+		{
+			name: "invalid WireGuard key",
+			iface: Interface{
+				Type:         "wireguard",
+				Protocol:     "static",
+				WGPrivateKey: "not-a-key",
+				Enabled:      true,
+			},
+			wantErr:    true,
+			errContain: "invalid WireGuard private key",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.iface.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContain)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestIPv6Config_Validate tests IPv6 configuration validation
+func TestIPv6Config_Validate(t *testing.T) {
+	tests := []struct {
+		name       string
+		config     IPv6Config
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "valid DHCP",
+			config: IPv6Config{
+				Protocol: "dhcp",
+				Enabled:  true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid static",
+			config: IPv6Config{
+				Protocol: "static",
+				IP6Addr:  "2001:db8::1",
+				IP6GW:    "2001:db8::ff",
+				DNS6:     []string{"2001:4860:4860::8888"},
+				Enabled:  true,
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid IP6Addr",
+			config: IPv6Config{
+				Protocol: "static",
+				IP6Addr:  "not-ipv6",
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "invalid address",
+		},
+		{
+			name: "invalid IP6GW",
+			config: IPv6Config{
+				Protocol: "static",
+				IP6Addr:  "2001:db8::1",
+				IP6GW:    "bad-gateway",
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "invalid gateway",
+		},
+		{
+			name: "invalid DNS6",
+			config: IPv6Config{
+				Protocol: "static",
+				DNS6:     []string{"bad-dns"},
+				Enabled:  true,
+			},
+			wantErr:    true,
+			errContain: "invalid DNS server",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContain)
+				assert.Contains(t, err.Error(), "IPv6")
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestWireGuardPeer_Validate tests WireGuard peer validation
+func TestWireGuardPeer_Validate(t *testing.T) {
+	tests := []struct {
+		name       string
+		peer       WireGuardPeer
+		wantErr    bool
+		errContain string
+	}{
+		{
+			name: "valid peer",
+			peer: WireGuardPeer{
+				PublicKey:  "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+				AllowedIPs: []string{"10.0.0.2/32"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid peer with endpoint",
+			peer: WireGuardPeer{
+				PublicKey:  "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+				Endpoint:   "vpn.example.com:51820",
+				AllowedIPs: []string{"0.0.0.0/0"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid public key",
+			peer: WireGuardPeer{
+				PublicKey:  "bad-key",
+				AllowedIPs: []string{"10.0.0.2/32"},
+			},
+			wantErr:    true,
+			errContain: "invalid public key",
+		},
+		{
+			name: "invalid preshared key",
+			peer: WireGuardPeer{
+				PublicKey:    "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+				PresharedKey: "bad-psk",
+				AllowedIPs:   []string{"10.0.0.2/32"},
+			},
+			wantErr:    true,
+			errContain: "invalid preshared key",
+		},
+		{
+			name: "invalid endpoint",
+			peer: WireGuardPeer{
+				PublicKey:  "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+				Endpoint:   "bad-endpoint",
+				AllowedIPs: []string{"10.0.0.2/32"},
+			},
+			wantErr:    true,
+			errContain: "invalid endpoint",
+		},
+		{
+			name: "invalid allowed IP",
+			peer: WireGuardPeer{
+				PublicKey:  "xTIBA5rboUvnH4htodjb6e697QjLERt1NAB4mZqp8Dg=",
+				AllowedIPs: []string{"bad-cidr"},
+			},
+			wantErr:    true,
+			errContain: "invalid allowed IP",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.peer.Validate()
+			if tt.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tt.errContain)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
