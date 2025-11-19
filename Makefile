@@ -1,4 +1,4 @@
-.PHONY: test lint lint-unused coverage coverage-unit coverage-integration coverage-merge check build clean install-tools deadcode deadcode-test clean-check test-integration docker-base-image
+.PHONY: test lint lint-unused coverage coverage-unit coverage-integration coverage-merge check build clean install-tools deadcode deadcode-test clean-check test-integration docker-base-image test-docker-combined serve-coverage
 
 # Run all tests (unit tests only)
 test:
@@ -56,8 +56,11 @@ coverage-integration: docker-base-image
 coverage-merge: coverage-unit coverage-integration
 	@echo ""
 	@echo "==> Merging coverage profiles..."
-	@# Properly merge coverage files (sum coverage counts for same lines)
-	@go run ./test/tools/mergecoverage.go coverage-unit.out coverage-integration.out > coverage-combined.out
+	@if [ ! -f $(HOME)/go/bin/gocovmerge ]; then \
+		echo "Error: gocovmerge not found. Install with: go install github.com/wadey/gocovmerge@latest"; \
+		exit 1; \
+	fi
+	@$(HOME)/go/bin/gocovmerge coverage-unit.out coverage-integration.out > coverage-combined.out
 	@echo "==> Generating combined coverage report..."
 	@go tool cover -html=coverage-combined.out -o coverage.html
 	@echo ""
@@ -140,6 +143,147 @@ test-integration: docker-base-image
 		jack-integration-base \
 		sh -c 'go mod download && go test -v -p=1 -tags=integration -timeout=10m ./test/integration/...'
 
+# Run both unit and integration tests in Docker with combined coverage
+test-docker-combined: docker-base-image
+	@echo "==> Building binaries locally..."
+	@mkdir -p bin
+	@go build -o jack
+	@cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
+	@cd plugins/core/wireguard && go build -o ../../../bin/jack-plugin-wireguard .
+	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
+	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
+	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
+	@cd plugins/core/sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
+	@echo "==> Running unit and integration tests in Docker with coverage..."
+	@mkdir -p coverage-data
+	@docker run --rm --privileged --cap-add=ALL \
+		-v $(PWD):/opt/jack \
+		-v $(PWD)/bin:/usr/lib/jack/plugins \
+		-v $(PWD)/coverage-data:/coverage-data \
+		-w /opt/jack \
+		jack-integration-base \
+		sh -c ' \
+			echo "==> Running unit tests with coverage..."; \
+			go test -v -race -covermode=atomic -coverprofile=/coverage-data/unit.out -coverpkg=./... ./...; \
+			echo ""; \
+			echo "==> Running integration tests with coverage..."; \
+			go test -v -p=1 -tags=integration -covermode=atomic -coverprofile=/coverage-data/integration.out -coverpkg=./... ./test/integration/...; \
+			echo ""; \
+			echo "==> Merging coverage profiles with gocovmerge..."; \
+			/go/bin/gocovmerge /coverage-data/unit.out /coverage-data/integration.out > /coverage-data/combined.out \
+		'
+	@cp coverage-data/combined.out coverage-combined.out
+	@echo ""
+	@echo "==> Generating HTML coverage reports..."
+	@go tool cover -html=coverage-data/unit.out -o coverage-data/unit.html
+	@go tool cover -html=coverage-data/integration.out -o coverage-data/integration.html
+	@go tool cover -html=coverage-data/combined.out -o coverage-data/combined.html
+	@echo "==> Generating coverage index page..."
+	@UNIT_COV=$$(go tool cover -func=coverage-data/unit.out | grep total | awk '{print $$3}'); \
+	INTEGRATION_COV=$$(go tool cover -func=coverage-data/integration.out | grep total | awk '{print $$3}'); \
+	COMBINED_COV=$$(go tool cover -func=coverage-combined.out | grep total | awk '{print $$3}'); \
+	cat > coverage-data/index.html <<'EOF' \
+	<!DOCTYPE html>\n\
+	<html>\n\
+	<head>\n\
+	    <title>Jack Coverage Reports</title>\n\
+	    <meta charset="utf-8">\n\
+	    <style>\n\
+	        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px auto; max-width: 800px; line-height: 1.6; color: #333; }\n\
+	        h1 { color: #2c3e50; border-bottom: 3px solid #3498db; padding-bottom: 10px; }\n\
+	        .report { background: #f8f9fa; border-left: 4px solid #3498db; padding: 20px; margin: 20px 0; border-radius: 4px; }\n\
+	        .report h2 { margin-top: 0; color: #2c3e50; }\n\
+	        .coverage { font-size: 2em; font-weight: bold; color: #27ae60; }\n\
+	        .coverage.low { color: #e74c3c; }\n\
+	        .coverage.medium { color: #f39c12; }\n\
+	        a { color: #3498db; text-decoration: none; font-weight: 500; }\n\
+	        a:hover { text-decoration: underline; }\n\
+	        .stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; margin: 30px 0; }\n\
+	        .stat { background: white; border: 1px solid #ddd; padding: 15px; text-align: center; border-radius: 4px; }\n\
+	        .stat-value { font-size: 2.5em; font-weight: bold; margin: 10px 0; }\n\
+	        .stat-label { color: #7f8c8d; font-size: 0.9em; text-transform: uppercase; }\n\
+	        footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #ddd; color: #7f8c8d; font-size: 0.9em; }\n\
+	    </style>\n\
+	</head>\n\
+	<body>\n\
+	    <h1>Jack Test Coverage Reports</h1>\n\
+	    <div class="stats">\n\
+	        <div class="stat">\n\
+	            <div class="stat-label">Unit Tests</div>\n\
+	            <div class="stat-value">$$UNIT_COV</div>\n\
+	        </div>\n\
+	        <div class="stat">\n\
+	            <div class="stat-label">Integration Tests</div>\n\
+	            <div class="stat-value">$$INTEGRATION_COV</div>\n\
+	        </div>\n\
+	        <div class="stat">\n\
+	            <div class="stat-label">Combined</div>\n\
+	            <div class="stat-value">$$COMBINED_COV</div>\n\
+	        </div>\n\
+	    </div>\n\
+	    <div class="report">\n\
+	        <h2>📊 Combined Coverage</h2>\n\
+	        <p>Merged coverage from both unit and integration tests.</p>\n\
+	        <p><a href="combined.html">View Combined Coverage Report →</a></p>\n\
+	    </div>\n\
+	    <div class="report">\n\
+	        <h2>🧪 Unit Tests</h2>\n\
+	        <p>Code coverage from unit tests only (no integration tests).</p>\n\
+	        <p><a href="unit.html">View Unit Test Coverage →</a></p>\n\
+	    </div>\n\
+	    <div class="report">\n\
+	        <h2>🐳 Integration Tests</h2>\n\
+	        <p>Code coverage from integration tests running in Docker.</p>\n\
+	        <p><a href="integration.html">View Integration Test Coverage →</a></p>\n\
+	    </div>\n\
+	    <footer>\n\
+	        <p>Generated by <code>make test-docker-combined</code></p>\n\
+	    </footer>\n\
+	</body>\n\
+	</html>\n\
+	EOF
+	@echo ""
+	@echo "Combined coverage summary:"
+	@go tool cover -func=coverage-combined.out | grep total
+	@echo ""
+	@echo "Coverage files:"
+	@echo "  - Unit: coverage-data/unit.out → coverage-data/unit.html"
+	@echo "  - Integration: coverage-data/integration.out → coverage-data/integration.html"
+	@echo "  - Combined: coverage-combined.out → coverage-data/combined.html"
+	@echo ""
+	@echo "Run 'make serve-coverage' to view reports in browser"
+
+# Serve coverage reports via HTTP
+serve-coverage:
+	@if [ ! -d coverage-data ]; then \
+		echo "Error: coverage-data directory not found. Run 'make test-docker-combined' first."; \
+		exit 1; \
+	fi
+	@if [ ! -f coverage-data/combined.html ]; then \
+		echo "Error: Coverage HTML reports not found. Run 'make test-docker-combined' first."; \
+		exit 1; \
+	fi
+	@if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then \
+		echo "Error: Port 8080 is already in use."; \
+		echo ""; \
+		echo "Process using port 8080:"; \
+		lsof -Pi :8080 -sTCP:LISTEN; \
+		echo ""; \
+		echo "To kill the process, run: kill \$$(lsof -t -i:8080)"; \
+		exit 1; \
+	fi
+	@echo "Starting HTTP server on http://localhost:8080"
+	@echo ""
+	@echo "📊 Coverage reports available at:"
+	@echo "  ➜ http://localhost:8080/ (Coverage overview)"
+	@echo "  ➜ http://localhost:8080/combined.html (Combined coverage)"
+	@echo "  ➜ http://localhost:8080/unit.html (Unit tests only)"
+	@echo "  ➜ http://localhost:8080/integration.html (Integration tests only)"
+	@echo ""
+	@echo "Press Ctrl+C to stop server"
+	@echo ""
+	@cd coverage-data && python3 -m http.server 8080
+
 # Build binaries
 build:
 	@echo "Building..."
@@ -165,6 +309,8 @@ help:
 	@echo "Available targets:"
 	@echo "  test                    - Run unit tests"
 	@echo "  test-integration        - Run integration tests in Docker (fast, cached)"
+	@echo "  test-docker-combined    - Run unit + integration tests in Docker with merged coverage"
+	@echo "  serve-coverage          - Serve coverage HTML reports via HTTP (port 8080)"
 	@echo "  docker-base-image       - Build cached Docker base image (auto-built when needed)"
 	@echo "  coverage                - Run combined unit + integration coverage (enforces $(MIN_COVERAGE)% minimum)"
 	@echo "  coverage-unit           - Run unit tests with coverage only"

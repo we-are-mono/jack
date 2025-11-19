@@ -27,42 +27,9 @@ jobs:
         go mod download
         go mod verify
 
-    - name: Run unit tests with coverage
+    - name: Run tests with coverage in Docker
       run: |
-        go test -v -race -coverprofile=coverage-unit.out -covermode=atomic ./...
-
-    - name: Run integration tests with coverage
-      run: |
-        # Build cached base image (OS + Go dependencies)
-        docker build -t jack-integration-base -f Dockerfile.test .
-
-        # Build binaries locally
-        mkdir -p bin
-        go build -o jack
-        cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
-        cd ../wireguard && go build -o ../../../bin/jack-plugin-wireguard .
-        cd ../dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
-        cd ../monitoring && go build -o ../../../bin/jack-plugin-monitoring .
-        cd ../leds && go build -o ../../../bin/jack-plugin-leds .
-        cd ../sqlite3 && CGO_ENABLED=1 go build -o ../../../bin/jack-plugin-sqlite3 .
-        cd ../../..
-
-        # Run integration tests with coverage (mount code and binaries)
-        mkdir -p coverage-data
-        docker run --rm --privileged --cap-add=ALL \
-          -v $(pwd):/opt/jack \
-          -v $(pwd)/bin:/usr/lib/jack/plugins \
-          -v $(pwd)/coverage-data:/coverage-data \
-          -w /opt/jack \
-          jack-integration-base \
-          sh -c 'go mod download && go test -v -p=1 -tags=integration -covermode=atomic -coverprofile=/coverage-data/integration.out -coverpkg=./... ./test/integration/...'
-
-        # Copy integration coverage file
-        cp coverage-data/integration.out coverage-integration.out
-
-    - name: Merge coverage profiles
-      run: |
-        go run ./test/tools/mergecoverage.go coverage-unit.out coverage-integration.out > coverage-combined.out
+        make test-docker-combined
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5

@@ -22,3 +22,6 @@ RUN mkdir -p /usr/lib/jack/plugins
 
 # Create coverage directory
 RUN mkdir -p /coverage-data
+
+# Install gocovmerge for combining coverage profiles
+RUN go install github.com/wadey/gocovmerge@latest
