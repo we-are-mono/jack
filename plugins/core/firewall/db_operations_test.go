@@ -23,11 +23,11 @@ import (
 
 // MockDatabaseService implements plugins.DaemonService for testing
 type MockDatabaseService struct {
-	calls          []MockCall
-	responses      map[string][]byte
-	errorOnCall    map[string]error
-	callCount      map[string]int
-	customHandler  func(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error)
+	calls         []MockCall
+	responses     map[string][]byte
+	errorOnCall   map[string]error
+	callCount     map[string]int
+	customHandler func(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error)
 }
 
 type MockCall struct {
@@ -45,8 +45,16 @@ func NewMockDatabaseService() *MockDatabaseService {
 	}
 }
 
-func (m *MockDatabaseService) Ping(ctx context.Context) error {
+func (m *MockDatabaseService) WaitForService(ctx context.Context, serviceName string) error {
 	return nil
+}
+
+func (m *MockDatabaseService) WaitForServices(ctx context.Context, serviceNames []string) error {
+	return nil
+}
+
+func (m *MockDatabaseService) IsServiceReady(serviceName string) bool {
+	return true
 }
 
 func (m *MockDatabaseService) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
@@ -348,7 +356,7 @@ func TestFirewallDatabase_QueryLogs_IncompleteRow(t *testing.T) {
 	queryResponse, _ := json.Marshal(map[string]interface{}{
 		"columns": []string{"timestamp", "action", "src_ip"},
 		"rows": [][]interface{}{
-			{"2025-01-15T10:00:00Z", "DROP", "192.168.1.100"}, // Only 3 columns, need 7
+			{"2025-01-15T10:00:00Z", "DROP", "192.168.1.100"},                                              // Only 3 columns, need 7
 			{"2025-01-15T10:01:00Z", "ACCEPT", "10.0.0.50", "1.1.1.1", "UDP", float64(12345), float64(53)}, // Complete
 		},
 	})
@@ -386,16 +394,16 @@ func TestFirewallDatabase_InsertLog_Success(t *testing.T) {
 	mock.SetResponse("database", "Exec", successResponse)
 
 	entry := &FirewallLogEntry{
-		Timestamp:     "2025-01-15T10:00:00Z",
-		Action:        "DROP",
-		SrcIP:         "192.168.1.100",
-		DstIP:         "8.8.8.8",
-		Protocol:      "TCP",
-		SrcPort:       54321,
-		DstPort:       80,
-		InterfaceIn:   "eth0",
-		InterfaceOut:  "eth1",
-		PacketLength:  60,
+		Timestamp:    "2025-01-15T10:00:00Z",
+		Action:       "DROP",
+		SrcIP:        "192.168.1.100",
+		DstIP:        "8.8.8.8",
+		Protocol:     "TCP",
+		SrcPort:      54321,
+		DstPort:      80,
+		InterfaceIn:  "eth0",
+		InterfaceOut: "eth1",
+		PacketLength: 60,
 	}
 
 	ctx := context.Background()
@@ -458,4 +466,161 @@ func TestFirewallDatabase_ResetInitialization(t *testing.T) {
 	// Reset
 	db.ResetInitialization()
 	assert.False(t, db.IsInitialized())
+}
+
+func TestFirewallDatabase_QueryLogsFiltered_WithFilters(t *testing.T) {
+	mock := NewMockDatabaseService()
+	db := NewFirewallDatabase(mock)
+
+	// Mock Query response with filtered logs
+	queryResponse, _ := json.Marshal(map[string]interface{}{
+		"columns": []string{"timestamp", "action", "src_ip", "dst_ip", "protocol", "src_port", "dst_port"},
+		"rows": [][]interface{}{
+			{"2025-01-15T10:00:00Z", "DROP", "192.168.1.100", "8.8.8.8", "TCP", float64(54321), float64(80)},
+		},
+	})
+	mock.SetResponse("database", "Query", queryResponse)
+
+	filter := &FirewallLogQuery{
+		Action: "DROP",
+		SrcIP:  "192.168.1.100",
+		Limit:  20,
+	}
+
+	ctx := context.Background()
+	logs, err := db.QueryLogsFiltered(ctx, filter)
+
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	assert.Equal(t, "DROP", logs[0].Action)
+	assert.Equal(t, "192.168.1.100", logs[0].SrcIP)
+}
+
+func TestFirewallDatabase_QueryLogsFiltered_AllFilters(t *testing.T) {
+	mock := NewMockDatabaseService()
+	db := NewFirewallDatabase(mock)
+
+	// Mock Query response
+	queryResponse, _ := json.Marshal(map[string]interface{}{
+		"columns": []string{"timestamp", "action", "src_ip", "dst_ip", "protocol", "src_port", "dst_port"},
+		"rows":    [][]interface{}{},
+	})
+	mock.SetResponse("database", "Query", queryResponse)
+
+	filter := &FirewallLogQuery{
+		Action:       "ACCEPT",
+		SrcIP:        "10.0.0.1",
+		DstIP:        "8.8.8.8",
+		Protocol:     "TCP",
+		InterfaceIn:  "eth0",
+		InterfaceOut: "eth1",
+		Limit:        50,
+	}
+
+	ctx := context.Background()
+	logs, err := db.QueryLogsFiltered(ctx, filter)
+
+	require.NoError(t, err)
+	assert.Len(t, logs, 0)
+
+	// Verify query was called with correct arguments
+	lastCall := mock.GetLastCall()
+	require.NotNil(t, lastCall)
+
+	var queryArgs map[string]interface{}
+	err = json.Unmarshal(lastCall.ArgsJSON, &queryArgs)
+	require.NoError(t, err)
+
+	// Verify all filters were included in the query
+	query := queryArgs["query"].(string)
+	assert.Contains(t, query, "action = ?")
+	assert.Contains(t, query, "src_ip = ?")
+	assert.Contains(t, query, "dst_ip = ?")
+	assert.Contains(t, query, "protocol = ?")
+	assert.Contains(t, query, "interface_in = ?")
+	assert.Contains(t, query, "interface_out = ?")
+	assert.Contains(t, query, "LIMIT 50")
+
+	// Verify args array contains all filter values
+	args := queryArgs["args"].([]interface{})
+	require.Len(t, args, 6)
+	assert.Equal(t, "ACCEPT", args[0])
+	assert.Equal(t, "10.0.0.1", args[1])
+	assert.Equal(t, "8.8.8.8", args[2])
+	assert.Equal(t, "TCP", args[3])
+	assert.Equal(t, "eth0", args[4])
+	assert.Equal(t, "eth1", args[5])
+}
+
+func TestFirewallDatabase_QueryLogsFiltered_DefaultLimit(t *testing.T) {
+	mock := NewMockDatabaseService()
+	db := NewFirewallDatabase(mock)
+
+	// Mock Query response
+	queryResponse, _ := json.Marshal(map[string]interface{}{
+		"columns": []string{"timestamp", "action", "src_ip", "dst_ip", "protocol", "src_port", "dst_port"},
+		"rows":    [][]interface{}{},
+	})
+	mock.SetResponse("database", "Query", queryResponse)
+
+	filter := &FirewallLogQuery{
+		Action: "DROP",
+		Limit:  0, // Should default to 20
+	}
+
+	ctx := context.Background()
+	_, err := db.QueryLogsFiltered(ctx, filter)
+
+	require.NoError(t, err)
+
+	// Verify default limit was applied
+	lastCall := mock.GetLastCall()
+	require.NotNil(t, lastCall)
+
+	var queryArgs map[string]interface{}
+	err = json.Unmarshal(lastCall.ArgsJSON, &queryArgs)
+	require.NoError(t, err)
+
+	query := queryArgs["query"].(string)
+	assert.Contains(t, query, "LIMIT 20")
+}
+
+func TestFirewallDatabase_QueryLogsFiltered_EmptyFilter(t *testing.T) {
+	mock := NewMockDatabaseService()
+	db := NewFirewallDatabase(mock)
+
+	// Mock Query response
+	queryResponse, _ := json.Marshal(map[string]interface{}{
+		"columns": []string{"timestamp", "action", "src_ip", "dst_ip", "protocol", "src_port", "dst_port"},
+		"rows": [][]interface{}{
+			{"2025-01-15T10:00:00Z", "DROP", "192.168.1.100", "8.8.8.8", "TCP", float64(54321), float64(80)},
+			{"2025-01-15T10:01:00Z", "ACCEPT", "10.0.0.50", "1.1.1.1", "UDP", float64(12345), float64(53)},
+		},
+	})
+	mock.SetResponse("database", "Query", queryResponse)
+
+	// Empty filter should return all logs (up to limit)
+	filter := &FirewallLogQuery{}
+
+	ctx := context.Background()
+	logs, err := db.QueryLogsFiltered(ctx, filter)
+
+	require.NoError(t, err)
+	require.Len(t, logs, 2)
+}
+
+func TestFirewallDatabase_QueryLogsFiltered_DatabaseError(t *testing.T) {
+	mock := NewMockDatabaseService()
+	db := NewFirewallDatabase(mock)
+
+	mock.SetError("database", "Query", fmt.Errorf("connection timeout"))
+
+	filter := &FirewallLogQuery{Action: "DROP"}
+
+	ctx := context.Background()
+	logs, err := db.QueryLogsFiltered(ctx, filter)
+
+	require.Error(t, err)
+	assert.Nil(t, logs)
+	assert.Contains(t, err.Error(), "failed to query logs")
 }

@@ -64,5 +64,14 @@
       "family": "ipv4"
     }
   ],
-  "port_forwards": []
+  "port_forwards": [],
+  "logging": {
+    "enabled": false,
+    "log_accepts": false,
+    "log_drops": true,
+    "sampling_rate": 1,
+    "rate_limit_per_sec": 100,
+    "max_log_entries": 50000,
+    "retention_days": 7
+  }
 }

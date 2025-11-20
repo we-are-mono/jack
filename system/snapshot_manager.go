@@ -100,7 +100,7 @@ func (sm *SnapshotManager) CaptureSystemSnapshot() (*SystemSnapshot, error) {
 		snapshot.Routes = append(snapshot.Routes, routeSnapshot)
 	}
 
-	// Capture nftables ruleset (if jack table exists)
+	// Capture firewall ruleset (if jack table exists)
 	// This is best-effort; if nft command fails, we continue
 	if output, err := sm.cmd.Run("nft", "-j", "list", "table", "inet", "jack"); err == nil {
 		snapshot.NftablesRules = string(output)
@@ -618,7 +618,7 @@ func (sm *SnapshotManager) snapshotRoutesMatch(route netlink.Route, snapshot Rou
 	return true
 }
 
-// RestoreNftablesRules restores the nftables ruleset from a JSON dump.
+// RestoreNftablesRules restores the firewall ruleset from a JSON dump.
 func (sm *SnapshotManager) RestoreNftablesRules(rulesJSON string) error {
 	if rulesJSON == "" {
 		// No rules to restore
@@ -639,9 +639,9 @@ func (sm *SnapshotManager) RestoreNftablesRules(rulesJSON string) error {
 
 	// Restore rules using nft
 	if output, err := sm.cmd.Run("nft", "-j", "-f", tmpFile.Name()); err != nil {
-		return fmt.Errorf("failed to restore nftables rules: %w (output: %s)", err, string(output))
+		return fmt.Errorf("failed to restore firewall rules: %w (output: %s)", err, string(output))
 	}
 
-	logger.Info("Successfully restored nftables rules")
+	logger.Info("Successfully restored firewall rules")
 	return nil
 }

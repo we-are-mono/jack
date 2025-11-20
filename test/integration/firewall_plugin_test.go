@@ -28,15 +28,15 @@ import (
 	"github.com/we-are-mono/jack/daemon"
 )
 
-// setupNftablesTest creates a test harness with nftables plugin enabled
+// setupNftablesTest creates a test harness with firewall plugin enabled
 func setupNftablesTest(t *testing.T) (*TestHarness, context.CancelFunc) {
 	harness := NewTestHarness(t)
 
-	// Create jack.json with nftables plugin enabled
+	// Create jack.json with firewall plugin enabled
 	jackConfig := `{
   "version": "1.0",
   "plugins": {
-    "nftables": {
+    "firewall": {
       "enabled": true,
       "version": ""
     }
@@ -107,10 +107,10 @@ func TestNftablesBasicZones(t *testing.T) {
 	// Apply configuration
 	sendFirewallConfig(t, h, firewallConfig)
 
-	// Verify nftables rules exist
+	// Verify firewall rules exist
 	cmd := exec.Command("nft", "list", "table", "inet", "jack")
 	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, "nftables table should exist")
+	require.NoError(t, err, "firewall table should exist")
 
 	outputStr := string(output)
 
@@ -178,7 +178,7 @@ func TestNftablesForwarding(t *testing.T) {
 func TestNftablesPortForwarding(t *testing.T) {
 	t.Skip("Port forwarding test needs investigation - rules not being applied despite correct config")
 
-	// TODO: Investigate why port forward rules aren't being added to nftables
+	// TODO: Investigate why port forward rules aren't being added to firewall
 	// The prerouting chain is created but rules aren't added
 	// Config is correctly sent to plugin but ApplyConfig may be failing silently
 }
@@ -418,7 +418,7 @@ func TestNftablesValidation(t *testing.T) {
 	// 4. Invalid protocols
 }
 
-// countNftablesRules counts the number of rules in nftables output
+// countNftablesRules counts the number of rules in firewall output
 func countNftablesRules(output string) int {
 	count := 0
 	lines := strings.Split(output, "\n")

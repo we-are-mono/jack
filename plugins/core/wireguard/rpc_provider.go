@@ -55,7 +55,7 @@ func (p *WireGuardRPCProvider) ApplyConfig(ctx context.Context, configJSON []byt
 		return err
 	}
 
-	return p.provider.ApplyConfig(nil, &vpnConfig)
+	return p.provider.ApplyConfig(ctx, &vpnConfig)
 }
 
 // ValidateConfig validates VPN configuration
@@ -65,17 +65,17 @@ func (p *WireGuardRPCProvider) ValidateConfig(ctx context.Context, configJSON []
 		return err
 	}
 
-	return p.provider.Validate(nil, &vpnConfig)
+	return p.provider.Validate(ctx, &vpnConfig)
 }
 
 // Flush removes all VPN tunnels
 func (p *WireGuardRPCProvider) Flush(ctx context.Context) error {
-	return p.provider.Flush(nil)
+	return p.provider.Flush(ctx)
 }
 
 // Status returns current status as JSON
 func (p *WireGuardRPCProvider) Status(ctx context.Context) ([]byte, error) {
-	enabled, provider, tunnels, err := p.provider.Status(nil)
+	enabled, provider, tunnels, err := p.provider.Status(ctx)
 	if err != nil {
 		return nil, err
 	}

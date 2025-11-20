@@ -867,7 +867,8 @@ func (s *Server) handleApply() Response {
 	}
 
 	// Execute apply with automatic rollback on error
-	if err := s.executeApplyWithRollback(snapshot); err != nil {
+	warnings, err := s.executeApplyWithRollback(snapshot)
+	if err != nil {
 		return Response{
 			Success: false,
 			Error:   fmt.Sprintf("apply failed, rolled back to checkpoint %s: %v", checkpointID, err),
@@ -877,15 +878,23 @@ func (s *Server) handleApply() Response {
 	// Success - prune old checkpoints (keep last 10)
 	s.state.PruneOldSnapshots(10)
 
+	// Build response message with warnings
+	message := fmt.Sprintf("Configuration applied (interfaces + %s + routes)",
+		strings.Join(s.registry.List(), " + "))
+
+	if len(warnings) > 0 {
+		message += "\n" + strings.Join(warnings, "\n")
+	}
+
 	return Response{
 		Success: true,
-		Message: fmt.Sprintf("Configuration applied (interfaces + %s + routes)",
-			strings.Join(s.registry.List(), " + ")),
+		Message: message,
 	}
 }
 
 // executeApplyWithRollback performs the actual apply operations with automatic rollback on failure.
-func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error {
+// Returns warnings and error. Warnings are informational messages that don't prevent success.
+func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) ([]string, error) {
 	// Mark that Jack is making changes to prevent observer from treating them as external
 	if s.networkObserver != nil {
 		s.networkObserver.MarkChange()
@@ -896,7 +905,7 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 
 	// Step 1: Enable IP forwarding
 	if err := system.EnableIPForwarding(); err != nil {
-		return fmt.Errorf("ip forwarding: %w", err)
+		return nil, fmt.Errorf("ip forwarding: %w", err)
 	}
 	appliedSteps = append(appliedSteps, "ipforward")
 
@@ -925,7 +934,7 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 				logger.Error("Rollback failed",
 					logger.Field{Key: "error", Value: rollbackErr.Error()})
 			}
-			return fmt.Errorf("interface %s: %w", name, err)
+			return nil, fmt.Errorf("interface %s: %w", name, err)
 		}
 	}
 
@@ -1024,7 +1033,7 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 				logger.Error("Rollback failed",
 					logger.Field{Key: "error", Value: rollbackErr.Error()})
 			}
-			return fmt.Errorf("plugin %s: %w", namespace, err)
+			return nil, fmt.Errorf("plugin %s: %w", namespace, err)
 		}
 
 		// Track this config as successfully applied
@@ -1057,13 +1066,47 @@ func (s *Server) executeApplyWithRollback(snapshot *system.SystemSnapshot) error
 				logger.Error("Rollback failed",
 					logger.Field{Key: "error", Value: rollbackErr.Error()})
 			}
-			return fmt.Errorf("routes: %w", err)
+			return nil, fmt.Errorf("routes: %w", err)
 		}
 	}
 	appliedSteps = append(appliedSteps, "routes")
 
+	// Collect warnings from all plugins
+	var warnings []string
+	for _, namespace := range s.registry.List() {
+		plugin, _ := s.registry.Get(namespace)
+
+		// Get plugin status to check for warnings
+		statusData, err := plugin.Status()
+		if err != nil {
+			continue // Skip if status fails
+		}
+
+		// Type assert to []byte
+		statusJSON, ok := statusData.([]byte)
+		if !ok {
+			continue // Skip if not []byte
+		}
+
+		var status map[string]interface{}
+		if err := json.Unmarshal(statusJSON, &status); err != nil {
+			continue
+		}
+
+		// Extract warnings array if present
+		if warningsRaw, ok := status["warnings"]; ok {
+			if warningsArray, ok := warningsRaw.([]interface{}); ok {
+				for _, w := range warningsArray {
+					if warningStr, ok := w.(string); ok {
+						warnings = append(warnings, fmt.Sprintf("[WARN] %s: %s", namespace, warningStr))
+					}
+				}
+			}
+		}
+	}
+
 	logger.Info("Apply operation completed successfully")
-	return nil
+	return warnings, nil
 }
 
 // rollbackPlugins rolls back all plugins to their snapshot state.
@@ -1790,10 +1833,10 @@ func (s *Server) handleRollback(checkpointID string) Response {
 		}
 	}
 
-	// Restore nftables rules if present
+	// Restore firewall rules if present
 	if snapshot.NftablesRules != "" {
 		if err := system.RestoreNftablesRules(snapshot.NftablesRules); err != nil {
-			logger.Warn("Failed to restore nftables rules",
+			logger.Warn("Failed to restore firewall rules",
 				logger.Field{Key: "error", Value: err.Error()})
 		}
 	}

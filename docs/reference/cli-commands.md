@@ -225,7 +225,7 @@ jack plugin list
 **Example output:**
 ```
 Available plugins:
-  nftables   (firewall)  - nftables-based firewall management
+  nftables   (firewall)  - firewall firewall management
   dnsmasq    (dhcp)      - dnsmasq-based DHCP server
   wireguard  (vpn)       - WireGuard VPN management
 ```

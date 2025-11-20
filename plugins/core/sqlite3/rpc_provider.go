@@ -16,6 +16,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 
 	"github.com/we-are-mono/jack/plugins"
@@ -69,37 +70,49 @@ func (p *SQLite3RPCProvider) Metadata(ctx context.Context) (plugins.MetadataResp
 
 // ApplyConfig applies sqlite3 configuration
 func (p *SQLite3RPCProvider) ApplyConfig(ctx context.Context, configJSON []byte) error {
+	log.Printf("[jack-plugin-sqlite3] ApplyConfig called\n")
+
 	var config DatabaseConfig
 	if err := json.Unmarshal(configJSON, &config); err != nil {
 		return err
 	}
 
+	log.Printf("[jack-plugin-sqlite3] Config: provider=%v, lastPath=%s, newPath=%s\n",
+		p.provider != nil, p.lastPath, config.DatabasePath)
+
 	// If database is not open yet, open it
 	if p.provider == nil {
+		log.Printf("[jack-plugin-sqlite3] Creating new database provider\n")
 		provider, err := NewDatabaseProvider(&config)
 		if err != nil {
+			log.Printf("[jack-plugin-sqlite3] Failed to create provider: %v\n", err)
 			return fmt.Errorf("failed to create database provider: %w", err)
 		}
 		p.provider = provider
 		p.lastPath = config.DatabasePath
+		log.Printf("[jack-plugin-sqlite3] Provider created successfully\n")
 		return nil
 	}
 
 	// If database path changed, we need to close old and open new
 	if config.DatabasePath != p.lastPath {
+		log.Printf("[jack-plugin-sqlite3] Database path changed, reopening\n")
 		p.provider.Close()
 		provider, err := NewDatabaseProvider(&config)
 		if err != nil {
+			log.Printf("[jack-plugin-sqlite3] Failed to create provider: %v\n", err)
 			return fmt.Errorf("failed to create database provider: %w", err)
 		}
 		p.provider = provider
 		p.lastPath = config.DatabasePath
+		log.Printf("[jack-plugin-sqlite3] Provider reopened successfully\n")
 		return nil
 	}
 
 	// Database is already open with same path - keep it open
 	// Just update any runtime config (like max_log_entries) if needed
 	// For now, we don't have any runtime-updatable config, so just return
+	log.Printf("[jack-plugin-sqlite3] Database already open with same path, skipping\n")
 	return nil
 }
 

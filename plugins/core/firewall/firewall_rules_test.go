@@ -124,7 +124,8 @@ func TestGeneratePortForwardFilterRule(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := GeneratePortForwardFilterRule(tt.portFwd)
+			loggingConfig := LoggingConfig{Enabled: false}
+			result := GeneratePortForwardFilterRule(tt.portFwd, loggingConfig)
 
 			for _, want := range tt.wantContain {
 				assert.Contains(t, result, want, "GeneratePortForwardFilterRule()")
@@ -198,7 +199,8 @@ func TestGenerateCustomRule(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := GenerateCustomRule(tt.rule)
+			loggingConfig := LoggingConfig{Enabled: false}
+			result := GenerateCustomRule(tt.rule, loggingConfig)
 
 			for _, want := range tt.wantContain {
 				assert.Contains(t, result, want, "GenerateCustomRule()")

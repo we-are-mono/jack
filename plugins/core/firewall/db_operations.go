@@ -20,14 +20,9 @@ import (
 	"github.com/we-are-mono/jack/plugins"
 )
 
-// DatabaseService defines the interface for database operations
-type DatabaseService interface {
-	CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error)
-}
-
 // FirewallDatabase handles all database operations for firewall logging
 type FirewallDatabase struct {
-	daemonService DatabaseService
+	daemonService plugins.DaemonService
 	schemaInit    bool
 }
 
@@ -54,7 +49,7 @@ func (db *FirewallDatabase) InitSchema(ctx context.Context) error {
 		return fmt.Errorf("daemon service not available")
 	}
 
-	log.Printf("[FIREWALL-DB] Initializing database schema...\n")
+	log.Printf("[FIREWALL] Initializing database schema...\n")
 
 	// Execute schema creation statements
 	statements := []string{
@@ -80,7 +75,7 @@ func (db *FirewallDatabase) InitSchema(ctx context.Context) error {
 	}
 
 	for i, stmt := range statements {
-		log.Printf("[FIREWALL-DB] Executing statement %d/%d\n", i+1, len(statements))
+		log.Printf("[FIREWALL] Executing statement %d/%d\n", i+1, len(statements))
 		execArgs := map[string]interface{}{
 			"query": stmt,
 			"args":  []interface{}{},
@@ -98,7 +93,7 @@ func (db *FirewallDatabase) InitSchema(ctx context.Context) error {
 	}
 
 	db.schemaInit = true
-	log.Printf("[FIREWALL-DB] Schema initialized successfully\n")
+	log.Printf("[FIREWALL] Schema initialized successfully\n")
 	return nil
 }
 
@@ -257,6 +252,105 @@ func (db *FirewallDatabase) QueryLogs(ctx context.Context, limit int) ([]LogEntr
 	return entries, nil
 }
 
+// QueryLogsFiltered retrieves firewall log entries with optional filtering
+func (db *FirewallDatabase) QueryLogsFiltered(ctx context.Context, filter *FirewallLogQuery) ([]LogEntry, error) {
+	// Build query with filters
+	query := "SELECT timestamp, action, src_ip, dst_ip, protocol, src_port, dst_port FROM firewall_logs WHERE 1=1"
+	args := []interface{}{}
+
+	if filter.Action != "" {
+		query += " AND action = ?"
+		args = append(args, filter.Action)
+	}
+	if filter.SrcIP != "" {
+		query += " AND src_ip = ?"
+		args = append(args, filter.SrcIP)
+	}
+	if filter.DstIP != "" {
+		query += " AND dst_ip = ?"
+		args = append(args, filter.DstIP)
+	}
+	if filter.Protocol != "" {
+		query += " AND protocol = ?"
+		args = append(args, filter.Protocol)
+	}
+	if filter.InterfaceIn != "" {
+		query += " AND interface_in = ?"
+		args = append(args, filter.InterfaceIn)
+	}
+	if filter.InterfaceOut != "" {
+		query += " AND interface_out = ?"
+		args = append(args, filter.InterfaceOut)
+	}
+
+	// Order by ID descending (newest first)
+	query += " ORDER BY id DESC"
+
+	// Apply limit
+	limit := filter.Limit
+	if limit == 0 {
+		limit = 20 // Default limit for watch command
+	}
+	query += fmt.Sprintf(" LIMIT %d", limit)
+
+	queryArgs := map[string]interface{}{
+		"query": query,
+		"args":  args,
+	}
+	queryJSON, err := json.Marshal(queryArgs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal query: %w", err)
+	}
+
+	result, err := db.daemonService.CallService(ctx, "database", "Query", queryJSON)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query logs: %w", err)
+	}
+
+	var rows struct {
+		Columns []string        `json:"columns"`
+		Rows    [][]interface{} `json:"rows"`
+	}
+	if err := json.Unmarshal(result, &rows); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal logs: %w", err)
+	}
+
+	// Convert to LogEntry structs
+	entries := make([]LogEntry, 0, len(rows.Rows))
+	for _, row := range rows.Rows {
+		if len(row) < 7 {
+			continue
+		}
+
+		entry := LogEntry{}
+		if v, ok := row[0].(string); ok {
+			entry.Timestamp = v
+		}
+		if v, ok := row[1].(string); ok {
+			entry.Action = v
+		}
+		if v, ok := row[2].(string); ok {
+			entry.SrcIP = v
+		}
+		if v, ok := row[3].(string); ok {
+			entry.DstIP = v
+		}
+		if v, ok := row[4].(string); ok {
+			entry.Protocol = v
+		}
+		if v, ok := row[5].(float64); ok {
+			entry.SrcPort = int64(v)
+		}
+		if v, ok := row[6].(float64); ok {
+			entry.DstPort = int64(v)
+		}
+
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
+}
+
 // InsertLog inserts a firewall log entry into the database
 func (db *FirewallDatabase) InsertLog(ctx context.Context, entry *FirewallLogEntry) error {
 	query := `INSERT INTO firewall_logs (timestamp, action, src_ip, dst_ip, protocol, src_port, dst_port, interface_in, interface_out, packet_length)
@@ -288,5 +382,23 @@ func (db *FirewallDatabase) InsertLog(ctx context.Context, entry *FirewallLogEnt
 		return fmt.Errorf("failed to insert log: %w", err)
 	}
 
+	return nil
+}
+
+// CleanupOldLogs removes logs older than the retention period (stub - not implemented)
+func (db *FirewallDatabase) CleanupOldLogs(ctx context.Context, retentionDays int) (int64, error) {
+	// Stub - maintenance handled by sqlite3 plugin or manual cleanup
+	return 0, nil
+}
+
+// EnforceMaxEntries ensures the log table doesn't exceed max entries (stub - not implemented)
+func (db *FirewallDatabase) EnforceMaxEntries(ctx context.Context, maxEntries int) (int64, error) {
+	// Stub - maintenance handled by sqlite3 plugin or manual cleanup
+	return 0, nil
+}
+
+// Vacuum performs database vacuum operation (stub - not implemented)
+func (db *FirewallDatabase) Vacuum(ctx context.Context) error {
+	// Stub - maintenance handled by sqlite3 plugin
 	return nil
 }

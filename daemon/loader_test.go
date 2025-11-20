@@ -82,6 +82,20 @@ func (m *mockProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) erro
 	return nil
 }
 
+func (m *mockProvider) GetProvidedServices(ctx context.Context) ([]plugins.ServiceDescriptor, error) {
+	// Mock implementation - no services provided
+	return nil, nil
+}
+
+func (m *mockProvider) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
+	// Mock implementation - service not found
+	return nil, nil
+}
+
+func (m *mockProvider) SetDaemonService(daemon plugins.DaemonService) {
+	// Mock implementation - do nothing
+}
+
 // mockPluginWithMetadata implements plugins.Plugin for testing with full metadata
 type mockPluginWithMetadata struct {
 	metadata plugins.PluginMetadata

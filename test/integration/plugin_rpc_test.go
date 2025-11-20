@@ -127,11 +127,11 @@ func TestPluginRPCInvalidConfig(t *testing.T) {
 	harness := NewTestHarness(t)
 	defer harness.Cleanup()
 
-	// Setup nftables plugin (has validation)
+	// Setup firewall plugin (has validation)
 	jackConfig := `{
   "version": "1.0",
   "plugins": {
-    "nftables": {
+    "firewall": {
       "enabled": true,
       "version": ""
     }
@@ -174,7 +174,7 @@ func TestPluginRPCInvalidConfig(t *testing.T) {
 	// This test documents current behavior
 	_, err = harness.SendRequest(daemon.Request{Command: "apply"})
 	// Apply may succeed or fail depending on plugin implementation
-	// nftables plugin will skip empty configs, so this might succeed
+	// firewall plugin will skip empty configs, so this might succeed
 	if err != nil {
 		assert.Contains(t, err.Error(), "zone")
 	}
@@ -185,11 +185,11 @@ func TestPluginRPCFlush(t *testing.T) {
 	harness := NewTestHarness(t)
 	defer harness.Cleanup()
 
-	// Setup nftables plugin
+	// Setup firewall plugin
 	jackConfig := `{
   "version": "1.0",
   "plugins": {
-    "nftables": {
+    "firewall": {
       "enabled": true,
       "version": ""
     }
@@ -292,7 +292,7 @@ func TestPluginRPCMultiplePlugins(t *testing.T) {
 	jackConfig := `{
   "version": "1.0",
   "plugins": {
-    "nftables": {
+    "firewall": {
       "enabled": true,
       "version": ""
     },

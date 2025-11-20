@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"os/exec"
 	"strings"
@@ -41,7 +42,7 @@ func New() (*WireGuardProvider, error) {
 
 // ApplyConfig applies the WireGuard VPN configuration
 func (p *WireGuardProvider) ApplyConfig(ctx context.Context, config *VPNConfig) error {
-	fmt.Println("Applying WireGuard VPN configuration...")
+	log.Println("Applying WireGuard VPN configuration...")
 
 	// Store interfaces for later reference
 	p.interfaces = config.Interfaces
@@ -51,11 +52,11 @@ func (p *WireGuardProvider) ApplyConfig(ctx context.Context, config *VPNConfig) 
 		if !iface.Enabled {
 			// Remove interface if it exists
 			if link, err := netlink.LinkByName(iface.DeviceName); err == nil {
-				fmt.Printf("  Removing disabled interface: %s\n", iface.DeviceName)
+				log.Printf("  Removing disabled interface: %s\n", iface.DeviceName)
 				if err := netlink.LinkDel(link); err != nil {
 					return fmt.Errorf("failed to remove interface %s: %w", iface.DeviceName, err)
 				}
-				fmt.Printf("    [OK] Interface %s removed\n", iface.DeviceName)
+				log.Printf("    [OK] Interface %s removed\n", iface.DeviceName)
 			}
 			continue
 		}
@@ -65,7 +66,7 @@ func (p *WireGuardProvider) ApplyConfig(ctx context.Context, config *VPNConfig) 
 		}
 	}
 
-	fmt.Println("✓ WireGuard configuration applied successfully")
+	log.Println("✓ WireGuard configuration applied successfully")
 	return nil
 }
 
@@ -77,7 +78,7 @@ func (p *WireGuardProvider) Validate(ctx context.Context, config *VPNConfig) err
 
 // Flush removes all WireGuard interfaces
 func (p *WireGuardProvider) Flush(ctx context.Context) error {
-	fmt.Println("Flushing all WireGuard interfaces...")
+	log.Println("Flushing all WireGuard interfaces...")
 
 	// List all WireGuard interfaces
 	links, err := netlink.LinkList()
@@ -88,20 +89,20 @@ func (p *WireGuardProvider) Flush(ctx context.Context) error {
 	for _, link := range links {
 		// Check if it's a WireGuard interface
 		if link.Type() == "wireguard" {
-			fmt.Printf("  Removing WireGuard interface: %s\n", link.Attrs().Name)
+			log.Printf("  Removing WireGuard interface: %s\n", link.Attrs().Name)
 			if err := netlink.LinkDel(link); err != nil {
-				fmt.Printf("  Warning: failed to remove %s: %v\n", link.Attrs().Name, err)
+				log.Printf("  Warning: failed to remove %s: %v\n", link.Attrs().Name, err)
 			}
 		}
 	}
 
-	fmt.Println("✓ WireGuard interfaces flushed")
+	log.Println("✓ WireGuard interfaces flushed")
 	return nil
 }
 
 // Enable activates all configured WireGuard interfaces
 func (p *WireGuardProvider) Enable(ctx context.Context) error {
-	fmt.Println("Enabling WireGuard interfaces...")
+	log.Println("Enabling WireGuard interfaces...")
 
 	for name, iface := range p.interfaces {
 		if !iface.Enabled {
@@ -117,16 +118,16 @@ func (p *WireGuardProvider) Enable(ctx context.Context) error {
 			return fmt.Errorf("failed to bring up %s: %w", name, err)
 		}
 
-		fmt.Printf("  ✓ Interface %s is up\n", iface.DeviceName)
+		log.Printf("  ✓ Interface %s is up\n", iface.DeviceName)
 	}
 
-	fmt.Println("✓ WireGuard interfaces enabled")
+	log.Println("✓ WireGuard interfaces enabled")
 	return nil
 }
 
 // Disable deactivates all WireGuard interfaces
 func (p *WireGuardProvider) Disable(ctx context.Context) error {
-	fmt.Println("Disabling WireGuard interfaces...")
+	log.Println("Disabling WireGuard interfaces...")
 
 	for name, iface := range p.interfaces {
 		link, err := netlink.LinkByName(iface.DeviceName)
@@ -136,13 +137,13 @@ func (p *WireGuardProvider) Disable(ctx context.Context) error {
 		}
 
 		if err := netlink.LinkSetDown(link); err != nil {
-			fmt.Printf("  Warning: failed to bring down %s: %v\n", name, err)
+			log.Printf("  Warning: failed to bring down %s: %v\n", name, err)
 		} else {
-			fmt.Printf("  ✓ Interface %s is down\n", iface.DeviceName)
+			log.Printf("  ✓ Interface %s is down\n", iface.DeviceName)
 		}
 	}
 
-	fmt.Println("✓ WireGuard interfaces disabled")
+	log.Println("✓ WireGuard interfaces disabled")
 	return nil
 }
 
@@ -167,7 +168,7 @@ func (p *WireGuardProvider) Status(ctx context.Context) (bool, string, int, erro
 
 // applyInterface configures a single WireGuard interface
 func (p *WireGuardProvider) applyInterface(name string, iface VPNInterface) error {
-	fmt.Printf("  Configuring WireGuard interface %s -> %s\n", name, iface.DeviceName)
+	log.Printf("  Configuring WireGuard interface %s -> %s\n", name, iface.DeviceName)
 
 	// Check if interface already exists
 	existingLink, err := netlink.LinkByName(iface.DeviceName)
@@ -177,16 +178,20 @@ func (p *WireGuardProvider) applyInterface(name string, iface VPNInterface) erro
 		// Interface exists - check if config matches
 		configMatches, err := p.interfaceConfigMatches(iface)
 		if err != nil {
-			fmt.Printf("    [WARN] Failed to check interface config: %v, recreating...\n", err)
+			log.Printf("    [WARN] Failed to check interface config: %v, recreating...\n", err)
 		} else if configMatches {
-			fmt.Printf("    [OK] WireGuard interface %s already configured correctly\n", iface.DeviceName)
+			log.Printf("    [OK] WireGuard interface %s already configured correctly\n", iface.DeviceName)
+			// Interface config matches, but routes might be missing - ensure routes are added
+			if err := p.addPeerRoutes(existingLink, iface); err != nil {
+				return fmt.Errorf("failed to add peer routes: %w", err)
+			}
 			return nil
 		} else {
-			fmt.Printf("    [INFO] WireGuard configuration changed, recreating interface\n")
+			log.Printf("    [INFO] WireGuard configuration changed, recreating interface\n")
 		}
 
 		// Delete existing interface to recreate with new config
-		fmt.Printf("    Removing existing interface %s\n", iface.DeviceName)
+		log.Printf("    Removing existing interface %s\n", iface.DeviceName)
 		if err := netlink.LinkDel(existingLink); err != nil {
 			return fmt.Errorf("failed to delete existing interface: %w", err)
 		}
@@ -198,7 +203,7 @@ func (p *WireGuardProvider) applyInterface(name string, iface VPNInterface) erro
 		return fmt.Errorf("failed to create interface: %s: %w", string(output), err)
 	}
 
-	fmt.Printf("    [OK] Interface %s created\n", iface.DeviceName)
+	log.Printf("    [OK] Interface %s created\n", iface.DeviceName)
 
 	// Set private key
 	cmd = exec.Command("wg", "set", iface.DeviceName, "private-key", "/dev/stdin")
@@ -213,7 +218,7 @@ func (p *WireGuardProvider) applyInterface(name string, iface VPNInterface) erro
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("failed to set listen port: %s: %w", string(output), err)
 		}
-		fmt.Printf("    [OK] Listen port set to %d\n", iface.ListenPort)
+		log.Printf("    [OK] Listen port set to %d\n", iface.ListenPort)
 	}
 
 	// Configure peers
@@ -241,7 +246,7 @@ func (p *WireGuardProvider) applyInterface(name string, iface VPNInterface) erro
 		return fmt.Errorf("failed to bring up interface: %w", err)
 	}
 
-	fmt.Printf("    [OK] Interface %s is up\n", iface.DeviceName)
+	log.Printf("    [OK] Interface %s is up\n", iface.DeviceName)
 
 	// Flush any existing IPs
 	if err := p.flushIPs(wgLink); err != nil {
@@ -281,7 +286,7 @@ func (p *WireGuardProvider) configurePeer(deviceName string, peer WireGuardPeer,
 	if peer.Comment != "" {
 		peerDesc = peer.Comment
 	}
-	fmt.Printf("    [OK] Peer %d configured: %s\n", index+1, peerDesc)
+	log.Printf("    [OK] Peer %d configured: %s\n", index+1, peerDesc)
 
 	return nil
 }
@@ -316,7 +321,7 @@ func (p *WireGuardProvider) setStaticIP(link netlink.Link, ipAddr, netmask strin
 		return fmt.Errorf("failed to add address: %w", err)
 	}
 
-	fmt.Printf("    [OK] IP address set: %s\n", cidr)
+	log.Printf("    [OK] IP address set: %s\n", cidr)
 	return nil
 }
 
@@ -329,10 +334,11 @@ func (p *WireGuardProvider) addPeerRoutes(link netlink.Link, iface VPNInterface)
 
 	for _, peer := range iface.Peers {
 		for _, allowedIP := range peer.AllowedIPs {
+
 			// Parse the allowed IP as CIDR
 			_, ipNet, err := net.ParseCIDR(allowedIP)
 			if err != nil {
-				fmt.Printf("    [WARN] Failed to parse allowed IP %s: %v\n", allowedIP, err)
+				log.Printf("    [WARN] Failed to parse allowed IP %s: %v\n", allowedIP, err)
 				continue
 			}
 
@@ -346,25 +352,103 @@ func (p *WireGuardProvider) addPeerRoutes(link netlink.Link, iface VPNInterface)
 				Priority:  metric,
 			}
 
-			// For default routes, we don't set Dst (it means default)
+			// For default routes on point-to-point interfaces like WireGuard
+			// Keep Dst as the parsed CIDR (0.0.0.0/0) and set Scope to LINK
 			if isDefaultRoute {
-				route.Dst = nil
+				route.Scope = netlink.SCOPE_LINK
+			}
+
+			// Also need to add a specific route to the endpoint through the physical gateway
+			// This ensures the VPN traffic itself can reach the endpoint
+			if isDefaultRoute && peer.Endpoint != "" {
+				if err := p.addEndpointRoute(peer.Endpoint); err != nil {
+					log.Printf("    [WARN] Failed to add endpoint route: %v\n", err)
+				}
 			}
 
 			// Try to add the route (ignore error if already exists)
 			if err := netlink.RouteAdd(route); err != nil {
 				// Check if route already exists
 				if !strings.Contains(err.Error(), "file exists") {
-					fmt.Printf("    [WARN] Failed to add route for %s: %v\n", allowedIP, err)
+					log.Printf("    [WARN] Failed to add route for %s: %v\n", allowedIP, err)
+				} else {
 				}
 			} else {
 				if isDefaultRoute {
-					fmt.Printf("    [OK] Added default route via %s (metric %d)\n", deviceName, metric)
+					log.Printf("    [OK] Added default route via %s (metric %d)\n", deviceName, metric)
 				} else {
-					fmt.Printf("    [OK] Added route %s via %s\n", allowedIP, deviceName)
+					log.Printf("    [OK] Added route %s via %s\n", allowedIP, deviceName)
 				}
 			}
 		}
+	}
+
+	return nil
+}
+
+// addEndpointRoute adds a specific route to the VPN endpoint through the default gateway
+// This ensures VPN traffic can reach the endpoint even when a default route through VPN exists
+func (p *WireGuardProvider) addEndpointRoute(endpoint string) error {
+
+	// Parse endpoint (format: "IP:port")
+	host, _, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return fmt.Errorf("invalid endpoint format %s: %w", endpoint, err)
+	}
+
+	// Parse the IP address
+	endpointIP := net.ParseIP(host)
+	if endpointIP == nil {
+		return fmt.Errorf("invalid endpoint IP: %s", host)
+	}
+
+	// Get default gateway from existing routes
+	// Look for the default route with highest priority (lowest metric)
+	routes, err := netlink.RouteList(nil, netlink.FAMILY_ALL)
+	if err != nil {
+		return fmt.Errorf("failed to list routes: %w", err)
+	}
+
+	var defaultGW net.IP
+	var defaultLink netlink.Link
+	lowestMetric := 999999
+
+	for _, route := range routes {
+		// Check if this is a default route (Dst=nil OR Dst=0.0.0.0/0)
+		isDefault := (route.Dst == nil) || (route.Dst != nil && route.Dst.String() == "0.0.0.0/0")
+
+		if isDefault && route.Gw != nil && route.Priority < lowestMetric {
+			// This is a default route with a gateway
+			// Skip if it's a WireGuard interface
+			if link, err := netlink.LinkByIndex(route.LinkIndex); err == nil {
+				if link.Type() != "wireguard" {
+					defaultGW = route.Gw
+					defaultLink = link
+					lowestMetric = route.Priority
+				}
+			}
+		}
+	}
+
+	if defaultGW == nil {
+		return fmt.Errorf("no default gateway found")
+	}
+
+	// Create route to endpoint via default gateway
+	endpointRoute := &netlink.Route{
+		Dst:       &net.IPNet{IP: endpointIP, Mask: net.CIDRMask(32, 32)}, // /32 for single IP
+		Gw:        defaultGW,
+		LinkIndex: defaultLink.Attrs().Index,
+	}
+
+	// Try to add the route (ignore if already exists)
+	if err := netlink.RouteAdd(endpointRoute); err != nil {
+		if !strings.Contains(err.Error(), "file exists") {
+			return fmt.Errorf("failed to add endpoint route: %w", err)
+		} else {
+		}
+	} else {
+		log.Printf("    [OK] Added route to VPN endpoint %s via %s\n", host, defaultGW)
 	}
 
 	return nil

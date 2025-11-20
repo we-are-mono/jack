@@ -142,5 +142,14 @@
       "enabled": true,
       "comment": "VNC remote desktop"
     }
-  ]
+  ],
+  "logging": {
+    "enabled": false,
+    "log_accepts": false,
+    "log_drops": true,
+    "sampling_rate": 1,
+    "rate_limit_per_sec": 100,
+    "max_log_entries": 50000,
+    "retention_days": 7
+  }
 }

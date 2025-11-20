@@ -47,17 +47,22 @@ func NewDatabaseProvider(config *DatabaseConfig) (*DatabaseProvider, error) {
 
 // connect establishes a connection to the SQLite database
 func (p *DatabaseProvider) connect() error {
+	log.Printf("[jack-plugin-sqlite3] connect() called for path: %s\n", p.config.DatabasePath)
+
 	// Ensure parent directory exists
 	dbDir := filepath.Dir(p.config.DatabasePath)
 	if err := os.MkdirAll(dbDir, 0755); err != nil {
 		return fmt.Errorf("failed to create database directory: %w", err)
 	}
+	log.Printf("[jack-plugin-sqlite3] Directory exists: %s\n", dbDir)
 
 	// Open database connection
+	log.Printf("[jack-plugin-sqlite3] Opening database...\n")
 	db, err := sql.Open("sqlite", p.config.DatabasePath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
+	log.Printf("[jack-plugin-sqlite3] Database opened\n")
 
 	// Set connection pool to single connection to avoid lock contention
 	// SQLite works best with a single writer connection
@@ -65,22 +70,37 @@ func (p *DatabaseProvider) connect() error {
 	db.SetMaxIdleConns(1)
 
 	// Test connection
+	log.Printf("[jack-plugin-sqlite3] Pinging database...\n")
 	if err := db.Ping(); err != nil {
 		db.Close()
 		return fmt.Errorf("failed to ping database: %w", err)
 	}
+	log.Printf("[jack-plugin-sqlite3] Ping successful\n")
 
 	// Enable WAL mode for better concurrency
+	log.Printf("[jack-plugin-sqlite3] Setting WAL mode...\n")
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		db.Close()
 		return fmt.Errorf("failed to enable WAL mode: %w", err)
 	}
+	log.Printf("[jack-plugin-sqlite3] WAL mode set\n")
+
+	// Recover from stale WAL by checkpointing on startup
+	// This handles cases where daemon was killed without clean shutdown
+	log.Printf("[jack-plugin-sqlite3] Checkpointing WAL...\n")
+	if _, err := db.Exec("PRAGMA wal_checkpoint(RESTART)"); err != nil {
+		log.Printf("[jack-plugin-sqlite3] Warning: WAL checkpoint on startup failed: %v", err)
+		// Don't fail connection, but log the issue
+	}
+	log.Printf("[jack-plugin-sqlite3] WAL checkpoint complete\n")
 
 	// Set busy timeout to 2 seconds
+	log.Printf("[jack-plugin-sqlite3] Setting busy timeout...\n")
 	if _, err := db.Exec("PRAGMA busy_timeout=2000"); err != nil {
 		db.Close()
 		return fmt.Errorf("failed to set busy timeout: %w", err)
 	}
+	log.Printf("[jack-plugin-sqlite3] Busy timeout set\n")
 
 	p.db = db
 	log.Printf("[jack-plugin-sqlite3] Connected to database: %s", p.config.DatabasePath)
@@ -138,6 +158,9 @@ func (p *DatabaseProvider) InsertLog(timestamp, level, component, message, field
 // Close closes the database connection
 func (p *DatabaseProvider) Close() error {
 	if p.db != nil {
+		// Checkpoint WAL to flush changes to main database file
+		// This helps prevent WAL file buildup and lock issues
+		_, _ = p.db.Exec("PRAGMA wal_checkpoint(TRUNCATE)")
 		return p.db.Close()
 	}
 	return nil

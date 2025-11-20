@@ -121,13 +121,14 @@ func printCompactStatus(data interface{}) {
 	fmt.Println()
 
 	// Interface summary
-	if interfacesData, ok := dataMap["interfaces"].([]interface{}); ok {
+	interfacesData, ok := dataMap["interfaces"].([]interface{})
+	if ok {
 		upCount := 0
 		downCount := 0
 
 		for _, ifaceData := range interfacesData {
 			if iface, ok := ifaceData.(map[string]interface{}); ok {
-				if state, ok := iface["State"].(string); ok {
+				if state, ok := iface["state"].(string); ok {
 					if state == "up" {
 						upCount++
 					} else {
@@ -229,9 +230,9 @@ func printVerboseStatus(data interface{}) {
 }
 
 func printInterface(iface map[string]interface{}) {
-	name, _ := iface["Name"].(string)      //nolint:errcheck // Default to empty if not present
-	ifaceType, _ := iface["Type"].(string) //nolint:errcheck // Default to empty if not present
-	state, _ := iface["State"].(string)    //nolint:errcheck // Default to empty if not present
+	name, _ := iface["name"].(string)      //nolint:errcheck // Default to empty if not present
+	ifaceType, _ := iface["type"].(string) //nolint:errcheck // Default to empty if not present
+	state, _ := iface["state"].(string)    //nolint:errcheck // Default to empty if not present
 
 	stateSymbol := "[UP]"
 	if state != "up" {
@@ -242,7 +243,7 @@ func printInterface(iface map[string]interface{}) {
 	fmt.Printf("    State:      %s\n", state)
 
 	// IP addresses
-	if ipAddrs, ok := iface["IPAddr"].([]interface{}); ok && len(ipAddrs) > 0 {
+	if ipAddrs, ok := iface["ipaddr"].([]interface{}); ok && len(ipAddrs) > 0 {
 		fmt.Printf("    IP Address: ")
 		for i, ip := range ipAddrs {
 			if i > 0 {
@@ -256,28 +257,28 @@ func printInterface(iface map[string]interface{}) {
 	}
 
 	// MTU
-	if mtu, ok := iface["MTU"].(float64); ok && mtu > 0 {
+	if mtu, ok := iface["mtu"].(float64); ok && mtu > 0 {
 		fmt.Printf("    MTU:        %d\n", int(mtu))
 	}
 
 	// Statistics
-	if rxPackets, ok := iface["RXPackets"].(float64); ok {
+	if rxPackets, ok := iface["rx_packets"].(float64); ok {
 		fmt.Printf("    RX:         %d packets", int(rxPackets))
-		if rxBytes, ok := iface["RXBytes"].(float64); ok {
+		if rxBytes, ok := iface["rx_bytes"].(float64); ok {
 			fmt.Printf(" (%s)", formatBytes(int64(rxBytes)))
 		}
-		if rxErrors, ok := iface["RXErrors"].(float64); ok && rxErrors > 0 {
+		if rxErrors, ok := iface["rx_errors"].(float64); ok && rxErrors > 0 {
 			fmt.Printf(" [%d errors]", int(rxErrors))
 		}
 		fmt.Println()
 	}
 
-	if txPackets, ok := iface["TXPackets"].(float64); ok {
+	if txPackets, ok := iface["tx_packets"].(float64); ok {
 		fmt.Printf("    TX:         %d packets", int(txPackets))
-		if txBytes, ok := iface["TXBytes"].(float64); ok {
+		if txBytes, ok := iface["tx_bytes"].(float64); ok {
 			fmt.Printf(" (%s)", formatBytes(int64(txBytes)))
 		}
-		if txErrors, ok := iface["TXErrors"].(float64); ok && txErrors > 0 {
+		if txErrors, ok := iface["tx_errors"].(float64); ok && txErrors > 0 {
 			fmt.Printf(" [%d errors]", int(txErrors))
 		}
 		fmt.Println()
@@ -373,6 +374,15 @@ func printPluginStatusVerbose(namespace string, pluginStatus interface{}) {
 			fmt.Printf("  %-12s %.0f\n", formattedKey+":", v)
 		case string:
 			fmt.Printf("  %-12s %s\n", formattedKey+":", v)
+		case []interface{}:
+			// Handle arrays (like warnings)
+			if key == "warnings" && len(v) > 0 {
+				for _, warning := range v {
+					if warningStr, ok := warning.(string); ok {
+						fmt.Printf("  ⚠️  Warning: %s\n", warningStr)
+					}
+				}
+			}
 		default:
 			// Skip printing complex data structures
 			continue

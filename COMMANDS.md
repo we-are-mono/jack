@@ -227,7 +227,7 @@ jack -h
 - Interface paths: `jack get interfaces <interface-name> <field>`
 - Route paths: `jack get routes <route-name> <field>`
 - Plugin namespaces:
-  - `firewall` (nftables plugin)
+  - `firewall` (firewall plugin)
   - `dhcp` (dnsmasq plugin)
   - `vpn` (wireguard plugin)
   - `monitoring` (monitoring plugin)

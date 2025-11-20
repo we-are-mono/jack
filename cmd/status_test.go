@@ -201,17 +201,17 @@ func TestPrintInterface(t *testing.T) {
 		{
 			name: "interface up with IP",
 			iface: map[string]interface{}{
-				"Name":  "eth0",
-				"Type":  "physical",
-				"State": "up",
-				"IPAddr": []interface{}{
+				"name":  "eth0",
+				"type":  "physical",
+				"state": "up",
+				"ipaddr": []interface{}{
 					"192.168.1.1/24",
 				},
-				"MTU":       float64(1500),
-				"RXPackets": float64(1000),
-				"TXPackets": float64(2000),
-				"RXBytes":   float64(1048576), // 1 MiB
-				"TXBytes":   float64(2097152), // 2 MiB
+				"mtu":        float64(1500),
+				"rx_packets": float64(1000),
+				"tx_packets": float64(2000),
+				"rx_bytes":   float64(1048576), // 1 MiB
+				"tx_bytes":   float64(2097152), // 2 MiB
 			},
 			contains: []string{
 				"[UP] eth0 (physical)",
@@ -225,9 +225,9 @@ func TestPrintInterface(t *testing.T) {
 		{
 			name: "interface down without IP",
 			iface: map[string]interface{}{
-				"Name":  "eth1",
-				"Type":  "bridge",
-				"State": "down",
+				"name":  "eth1",
+				"type":  "bridge",
+				"state": "down",
 			},
 			contains: []string{
 				"[DOWN] eth1 (bridge)",
@@ -238,13 +238,13 @@ func TestPrintInterface(t *testing.T) {
 		{
 			name: "interface with errors",
 			iface: map[string]interface{}{
-				"Name":      "eth2",
-				"Type":      "vlan",
-				"State":     "up",
-				"RXPackets": float64(500),
-				"TXPackets": float64(600),
-				"RXErrors":  float64(10),
-				"TXErrors":  float64(5),
+				"name":       "eth2",
+				"type":       "vlan",
+				"state":      "up",
+				"rx_packets": float64(500),
+				"tx_packets": float64(600),
+				"rx_errors":  float64(10),
+				"tx_errors":  float64(5),
 			},
 			contains: []string{
 				"[UP] eth2 (vlan)",
@@ -440,13 +440,13 @@ func TestPrintCompactStatus(t *testing.T) {
 				"ip_forwarding": true,
 				"interfaces": []interface{}{
 					map[string]interface{}{
-						"State": "up",
+						"state": "up",
 					},
 					map[string]interface{}{
-						"State": "up",
+						"state": "up",
 					},
 					map[string]interface{}{
-						"State": "down",
+						"state": "down",
 					},
 				},
 			},
@@ -544,9 +544,9 @@ func TestPrintVerboseStatus(t *testing.T) {
 				"ip_forwarding": true,
 				"interfaces": []interface{}{
 					map[string]interface{}{
-						"Name":  "eth0",
-						"Type":  "physical",
-						"State": "up",
+						"name":  "eth0",
+						"type":  "physical",
+						"state": "up",
 					},
 				},
 				"plugins": map[string]interface{}{

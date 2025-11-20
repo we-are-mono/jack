@@ -9,37 +9,44 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
 
-// Package nftables implements the nftables plugin for Jack.
+// Package main implements the firewall plugin for Jack using nftables.
 package main
 
 import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
 )
 
-type NftablesProvider struct {
-	tableName     string
+type FirewallProvider struct {
+	tableName      string
 	configHashPath string
+	loggingConfig  LoggingConfig
 }
 
-func NewNftables() (*NftablesProvider, error) {
+func NewFirewall() (*FirewallProvider, error) {
 	// Check if nft is available
 	if _, err := exec.LookPath("nft"); err != nil {
 		return nil, fmt.Errorf("nftables not found: %w", err)
 	}
 
-	return &NftablesProvider{
+	return &FirewallProvider{
 		tableName:      "jack",
-		configHashPath: "/var/lib/jack/nftables-config.hash",
+		configHashPath: "/var/lib/jack/firewall-config.hash",
 	}, nil
 }
 
-func (n *NftablesProvider) ApplyConfig(config *FirewallConfig) error {
-	fmt.Println("  Applying firewall configuration...")
+func (n *FirewallProvider) ApplyConfig(config *FirewallConfig) error {
+	log.Println("[FIREWALL] Applying firewall configuration...")
+
+	// Store logging config for use in rule generation
+	n.loggingConfig = config.Logging
+	log.Printf("[FIREWALL] Logging config: enabled=%v, log_accepts=%v, log_drops=%v\n",
+		n.loggingConfig.Enabled, n.loggingConfig.LogAccepts, n.loggingConfig.LogDrops)
 
 	// Calculate hash of new config
 	newHash, err := n.calculateConfigHash(config)
@@ -52,16 +59,16 @@ func (n *NftablesProvider) ApplyConfig(config *FirewallConfig) error {
 	if err == nil && lastHash == newHash {
 		// Hash matches, but verify the table actually exists before skipping
 		if n.tableExists() {
-			fmt.Println("    [OK] Firewall configuration unchanged, skipping rebuild")
+			log.Println("[FIREWALL] Firewall configuration unchanged, skipping rebuild")
 			return nil
 		}
-		fmt.Println("    [INFO] Table doesn't exist, rebuilding despite matching hash...")
+		log.Println("[FIREWALL] Table doesn't exist, rebuilding despite matching hash...")
 	}
 
 	if err == nil {
-		fmt.Println("    [INFO] Firewall configuration changed, rebuilding...")
+		log.Println("[FIREWALL] Firewall configuration changed, rebuilding...")
 	} else {
-		fmt.Println("    [INFO] No previous firewall configuration, building...")
+		log.Println("[FIREWALL] No previous firewall configuration, building...")
 	}
 
 	// Flush existing rules
@@ -126,14 +133,14 @@ func (n *NftablesProvider) ApplyConfig(config *FirewallConfig) error {
 	// Save hash of successfully applied config
 	if err := n.saveConfigHash(newHash); err != nil {
 		// Log warning but don't fail - config was applied successfully
-		fmt.Printf("    [WARN] Failed to save config hash: %v\n", err)
+		log.Printf("[FIREWALL] Failed to save config hash: %v\n", err)
 	}
 
-	fmt.Println("    [OK] Firewall configured")
+	log.Println("[FIREWALL] Firewall configured")
 	return nil
 }
 
-func (n *NftablesProvider) createTable() error {
+func (n *FirewallProvider) createTable() error {
 	// Create inet table (handles both IPv4 and IPv6)
 	cmd := exec.Command("nft", "add", "table", "inet", n.tableName)
 	if err := cmd.Run(); err != nil {
@@ -142,7 +149,7 @@ func (n *NftablesProvider) createTable() error {
 	return nil
 }
 
-func (n *NftablesProvider) createZoneChains(zoneName string, zone Zone) error {
+func (n *FirewallProvider) createZoneChains(zoneName string, zone Zone) error {
 	// Create input chain for this zone
 	inputChain := fmt.Sprintf("input_%s", zoneName)
 	if err := n.runNft("add", "chain", "inet", n.tableName, inputChain); err != nil {
@@ -178,11 +185,11 @@ func (n *NftablesProvider) createZoneChains(zoneName string, zone Zone) error {
 
 	// DON'T add default policy here - it will be added after custom rules
 
-	fmt.Printf("    [OK] Created zone: %s\n", zoneName)
+	log.Printf("[FIREWALL] Created zone: %s\n", zoneName)
 	return nil
 }
 
-func (n *NftablesProvider) applyDefaultPolicies(config *FirewallConfig) error {
+func (n *FirewallProvider) applyDefaultPolicies(config *FirewallConfig) error {
 	// Apply default policies for each zone (these go at the END of chains)
 	for zoneName, zone := range config.Zones {
 		inputChain := fmt.Sprintf("input_%s", zoneName)
@@ -191,12 +198,27 @@ func (n *NftablesProvider) applyDefaultPolicies(config *FirewallConfig) error {
 		inputPolicy := strings.ToLower(zone.Input)
 		forwardPolicy := strings.ToLower(zone.Forward)
 
-		// Add default policy as LAST rule in each chain
-		if err := n.addRule("filter", inputChain, fmt.Sprintf("counter %s", inputPolicy)); err != nil {
+		// Build input policy rule with optional logging
+		inputRule := ""
+		if shouldLog(inputPolicy, n.loggingConfig) {
+			nflogGroup := getNFLOGGroup(inputPolicy)
+			inputRule = fmt.Sprintf(`log group %d counter %s`, nflogGroup, inputPolicy)
+		} else {
+			inputRule = fmt.Sprintf("counter %s", inputPolicy)
+		}
+		if err := n.addRule("filter", inputChain, inputRule); err != nil {
 			return err
 		}
 
-		if err := n.addRule("filter", forwardChain, fmt.Sprintf("counter %s", forwardPolicy)); err != nil {
+		// Build forward policy rule with optional logging
+		forwardRule := ""
+		if shouldLog(forwardPolicy, n.loggingConfig) {
+			nflogGroup := getNFLOGGroup(forwardPolicy)
+			forwardRule = fmt.Sprintf(`log group %d counter %s`, nflogGroup, forwardPolicy)
+		} else {
+			forwardRule = fmt.Sprintf("counter %s", forwardPolicy)
+		}
+		if err := n.addRule("filter", forwardChain, forwardRule); err != nil {
 			return err
 		}
 	}
@@ -204,24 +226,30 @@ func (n *NftablesProvider) applyDefaultPolicies(config *FirewallConfig) error {
 	return nil
 }
 
-func (n *NftablesProvider) applyForwarding(fwd Forwarding, zones map[string]Zone) error {
+func (n *FirewallProvider) applyForwarding(fwd Forwarding, zones map[string]Zone) error {
 	srcZone := zones[fwd.Src]
 
 	srcChain := fmt.Sprintf("forward_%s", fwd.Src)
 
 	// Allow forwarding from src zone to dest zone
 	for _, srcIface := range srcZone.Interfaces {
-		rule := fmt.Sprintf("iifname %s counter accept comment \"%s\"", srcIface, fwd.Comment)
+		rule := ""
+		if shouldLog("accept", n.loggingConfig) {
+			nflogGroup := getNFLOGGroup("accept")
+			rule = fmt.Sprintf(`iifname %s log group %d counter accept comment "%s"`, srcIface, nflogGroup, fwd.Comment)
+		} else {
+			rule = fmt.Sprintf("iifname %s counter accept comment \"%s\"", srcIface, fwd.Comment)
+		}
 		if err := n.addRule("filter", srcChain, rule); err != nil {
 			return err
 		}
 	}
 
-	fmt.Printf("    [OK] Forwarding: %s → %s\n", fwd.Src, fwd.Dest)
+	log.Printf("[FIREWALL] Forwarding: %s → %s\n", fwd.Src, fwd.Dest)
 	return nil
 }
 
-func (n *NftablesProvider) applyMasquerade(zoneName string, zone Zone) error {
+func (n *FirewallProvider) applyMasquerade(zoneName string, zone Zone) error {
 	// Create NAT postrouting chain if it doesn't exist
 	if err := n.runNft("add", "chain", "inet", n.tableName, "postrouting",
 		"{", "type", "nat", "hook", "postrouting", "priority", "100", ";", "}"); err != nil {
@@ -236,11 +264,11 @@ func (n *NftablesProvider) applyMasquerade(zoneName string, zone Zone) error {
 		}
 	}
 
-	fmt.Printf("    [OK] NAT masquerade enabled for zone: %s\n", zoneName)
+	log.Printf("[FIREWALL] NAT masquerade enabled for zone: %s\n", zoneName)
 	return nil
 }
 
-func (n *NftablesProvider) applyPortForward(portFwd PortForward) error {
+func (n *FirewallProvider) applyPortForward(portFwd PortForward) error {
 	// Create NAT prerouting chain if it doesn't exist
 	if err := n.runNft("add", "chain", "inet", n.tableName, "prerouting",
 		"{", "type", "nat", "hook", "prerouting", "priority", "-100", ";", "}"); err != nil {
@@ -254,12 +282,12 @@ func (n *NftablesProvider) applyPortForward(portFwd PortForward) error {
 	}
 
 	// Build the filter rule using pure function
-	fwdRuleStr := GeneratePortForwardFilterRule(portFwd)
+	fwdRuleStr := GeneratePortForwardFilterRule(portFwd, n.loggingConfig)
 	if err := n.addRule("filter", "forward", fwdRuleStr); err != nil {
 		return err
 	}
 
-	fmt.Printf("    [OK] Port forward: %s:%s → %s:%s (%s)\n",
+	log.Printf("[FIREWALL] Port forward: %s:%s → %s:%s (%s)\n",
 		portFwd.Src, portFwd.SrcDPort, portFwd.DestIP,
 		getDestPort(portFwd), portFwd.Name)
 
@@ -274,20 +302,20 @@ func getDestPort(portFwd PortForward) string {
 	return portFwd.SrcDPort
 }
 
-func (n *NftablesProvider) applyRule(rule Rule) error {
+func (n *FirewallProvider) applyRule(rule Rule) error {
 	srcChain := fmt.Sprintf("input_%s", rule.Src)
 
 	// Build the rule using pure function
-	ruleStr := GenerateCustomRule(rule)
+	ruleStr := GenerateCustomRule(rule, n.loggingConfig)
 	if err := n.addRule("filter", srcChain, ruleStr); err != nil {
 		return err
 	}
 
-	fmt.Printf("    [OK] Rule applied: %s\n", rule.Name)
+	log.Printf("[FIREWALL] Rule applied: %s\n", rule.Name)
 	return nil
 }
 
-func (n *NftablesProvider) addRule(chainType, chainName, rule string) error {
+func (n *FirewallProvider) addRule(chainType, chainName, rule string) error {
 	// Ensure base chains exist
 	if chainName == "input" || chainName == "forward" || chainName == "output" {
 		n.ensureBaseChain(chainType, chainName)
@@ -296,7 +324,7 @@ func (n *NftablesProvider) addRule(chainType, chainName, rule string) error {
 	return n.runNft("add", "rule", "inet", n.tableName, chainName, rule)
 }
 
-func (n *NftablesProvider) ensureBaseChain(chainType, chainName string) error {
+func (n *FirewallProvider) ensureBaseChain(chainType, chainName string) error {
 	var hookType, priority string
 
 	switch chainName {
@@ -323,27 +351,27 @@ func (n *NftablesProvider) ensureBaseChain(chainType, chainName string) error {
 	return nil
 }
 
-func (n *NftablesProvider) Flush() error {
+func (n *FirewallProvider) Flush() error {
 	// Delete our table (this removes all our rules)
 	cmd := exec.Command("nft", "delete", "table", "inet", n.tableName)
 	cmd.Run() // Ignore error if table doesn't exist
 
-	fmt.Println("    [OK] Flushed firewall rules")
+	log.Println("[FIREWALL] Flushed firewall rules")
 	return nil
 }
 
-func (n *NftablesProvider) Validate(config *FirewallConfig) error {
+func (n *FirewallProvider) Validate(config *FirewallConfig) error {
 	// Use comprehensive validation from pure function
 	return ValidateFirewallConfig(config)
 }
 
-func (n *NftablesProvider) Enable() error {
+func (n *FirewallProvider) Enable() error {
 	// nftables doesn't have a global enable/disable
 	// Rules are active as soon as they're added
 	return nil
 }
 
-func (n *NftablesProvider) Disable() error {
+func (n *FirewallProvider) Disable() error {
 	return n.Flush()
 }
 
@@ -355,13 +383,13 @@ type Status struct {
 }
 
 // tableExists checks if the nftables table exists on the system
-func (n *NftablesProvider) tableExists() bool {
+func (n *FirewallProvider) tableExists() bool {
 	cmd := exec.Command("nft", "list", "table", "inet", n.tableName)
 	err := cmd.Run()
 	return err == nil
 }
 
-func (n *NftablesProvider) Status() (*Status, error) {
+func (n *FirewallProvider) Status() (*Status, error) {
 	// Check if our table exists and get rule count
 	cmd := exec.Command("nft", "list", "table", "inet", n.tableName)
 	output, err := cmd.CombinedOutput()
@@ -395,7 +423,7 @@ func (n *NftablesProvider) Status() (*Status, error) {
 	}, nil
 }
 
-func (n *NftablesProvider) runNft(args ...string) error {
+func (n *FirewallProvider) runNft(args ...string) error {
 	cmd := exec.Command("nft", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -404,7 +432,7 @@ func (n *NftablesProvider) runNft(args ...string) error {
 	return nil
 }
 
-func (n *NftablesProvider) addGlobalRules() error {
+func (n *FirewallProvider) addGlobalRules() error {
 	// Allow established/related connections in forward chain (for return traffic)
 	if err := n.addRule("filter", "forward", "ct state established,related counter accept"); err != nil {
 		return err
@@ -414,7 +442,7 @@ func (n *NftablesProvider) addGlobalRules() error {
 }
 
 // calculateConfigHash generates a SHA256 hash of the config for comparison
-func (n *NftablesProvider) calculateConfigHash(config *FirewallConfig) (string, error) {
+func (n *FirewallProvider) calculateConfigHash(config *FirewallConfig) (string, error) {
 	// Serialize config to JSON for consistent hashing
 	jsonData, err := json.Marshal(config)
 	if err != nil {
@@ -427,7 +455,7 @@ func (n *NftablesProvider) calculateConfigHash(config *FirewallConfig) (string, 
 }
 
 // readConfigHash reads the stored config hash from disk
-func (n *NftablesProvider) readConfigHash() (string, error) {
+func (n *FirewallProvider) readConfigHash() (string, error) {
 	data, err := os.ReadFile(n.configHashPath)
 	if err != nil {
 		return "", err
@@ -436,7 +464,7 @@ func (n *NftablesProvider) readConfigHash() (string, error) {
 }
 
 // saveConfigHash saves the config hash to disk
-func (n *NftablesProvider) saveConfigHash(hash string) error {
+func (n *FirewallProvider) saveConfigHash(hash string) error {
 	// Ensure directory exists
 	dir := "/var/lib/jack"
 	if err := os.MkdirAll(dir, 0755); err != nil {

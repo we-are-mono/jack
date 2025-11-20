@@ -94,7 +94,7 @@ This creates:
 release/
 ├── jack-v0.1.0-linux-arm64/
 │   ├── jack
-│   ├── jack-plugin-nftables
+│   ├── jack-plugin-firewall
 │   ├── jack-plugin-dnsmasq
 │   ├── jack-plugin-wireguard
 │   ├── jack-plugin-monitoring

@@ -27,6 +27,7 @@ type FirewallConfig struct {
 	Forwardings  []Forwarding     `json:"forwardings"`
 	Rules        []Rule           `json:"rules"`
 	PortForwards []PortForward    `json:"port_forwards"`
+	Logging      LoggingConfig    `json:"logging"`
 }
 
 // FirewallDefaults represents default firewall policies
@@ -87,6 +88,48 @@ type PortForward struct {
 	Target   string `json:"target"`
 	Enabled  bool   `json:"enabled"`
 	Comment  string `json:"comment"`
+}
+
+// LoggingConfig represents firewall logging configuration
+type LoggingConfig struct {
+	Enabled          bool `json:"enabled"`
+	LogAccepts       bool `json:"log_accepts"`        // Log ACCEPT packets
+	LogDrops         bool `json:"log_drops"`          // Log DROP packets
+	SamplingRate     int  `json:"sampling_rate"`      // Log 1 out of N packets (1 = all)
+	RateLimitPerSec  int  `json:"rate_limit_per_sec"` // Maximum logs per second
+	MaxLogEntries    int  `json:"max_log_entries"`    // Maximum entries in database (0 = unlimited)
+	RetentionDays    int  `json:"retention_days"`     // Days to keep logs (0 = forever)
+}
+
+// FirewallLoggingConfig is an alias for LoggingConfig for compatibility
+type FirewallLoggingConfig = LoggingConfig
+
+// FirewallLogEntry represents a single firewall log entry
+type FirewallLogEntry struct {
+	ID           int64  `json:"id"`
+	Timestamp    string `json:"timestamp"`
+	Action       string `json:"action"`        // ACCEPT or DROP
+	SrcIP        string `json:"src_ip"`
+	DstIP        string `json:"dst_ip"`
+	Protocol     string `json:"protocol"`      // TCP, UDP, ICMP, etc.
+	SrcPort      int    `json:"src_port"`
+	DstPort      int    `json:"dst_port"`
+	InterfaceIn  string `json:"interface_in"`
+	InterfaceOut string `json:"interface_out"`
+	PacketLength int    `json:"packet_length"`
+	CreatedAt    string `json:"created_at"`
+}
+
+// FirewallLogQuery represents query parameters for filtering logs
+type FirewallLogQuery struct {
+	Action       string `json:"action"`        // Filter by action (ACCEPT/DROP)
+	SrcIP        string `json:"src_ip"`        // Filter by source IP
+	DstIP        string `json:"dst_ip"`        // Filter by destination IP
+	Protocol     string `json:"protocol"`      // Filter by protocol
+	InterfaceIn  string `json:"interface_in"`  // Filter by input interface
+	InterfaceOut string `json:"interface_out"` // Filter by output interface
+	Limit        int    `json:"limit"`         // Maximum number of results (0 = no limit)
+	Since        string `json:"since"`         // Only show logs after this timestamp (RFC3339)
 }
 
 // Validate checks if the FirewallConfig is valid.

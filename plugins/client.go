@@ -14,7 +14,6 @@ package plugins
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/rpc"
 	"os"
@@ -46,7 +45,7 @@ func NewPluginClient(pluginPath string) (*PluginClient, error) {
 
 	logger := hclog.New(&hclog.LoggerOptions{
 		Name:   "plugin",
-		Output: io.Discard, // Discard all plugin framework logs by default
+		Output: os.Stderr, // Send plugin logs to stderr
 		Level:  logLevel,
 	})
 

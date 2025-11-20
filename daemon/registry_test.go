@@ -198,11 +198,11 @@ func TestPluginRegistry_GetNamespaceForPlugin(t *testing.T) {
 
 	// Register a plugin
 	plugin := &mockPlugin{namespace: "firewall"}
-	err := registry.Register(plugin, "jack-plugin-nftables")
+	err := registry.Register(plugin, "jack-plugin-firewall")
 	require.NoError(t, err)
 
 	// Get namespace for plugin name
-	namespace, exists := registry.GetNamespaceForPlugin("jack-plugin-nftables")
+	namespace, exists := registry.GetNamespaceForPlugin("jack-plugin-firewall")
 	assert.True(t, exists)
 	assert.Equal(t, "firewall", namespace)
 
@@ -217,13 +217,13 @@ func TestPluginRegistry_GetPluginNameForNamespace(t *testing.T) {
 
 	// Register a plugin
 	plugin := &mockPlugin{namespace: "firewall"}
-	err := registry.Register(plugin, "jack-plugin-nftables")
+	err := registry.Register(plugin, "jack-plugin-firewall")
 	require.NoError(t, err)
 
 	// Get plugin name for namespace
 	pluginName, exists := registry.GetPluginNameForNamespace("firewall")
 	assert.True(t, exists)
-	assert.Equal(t, "jack-plugin-nftables", pluginName)
+	assert.Equal(t, "jack-plugin-firewall", pluginName)
 
 	// Get plugin name for non-existent namespace
 	pluginName, exists = registry.GetPluginNameForNamespace("nonexistent")
@@ -239,7 +239,7 @@ func TestPluginRegistry_GetAll(t *testing.T) {
 	assert.Empty(t, all)
 
 	// Register multiple plugins
-	registry.Register(&mockPlugin{namespace: "firewall"}, "nftables")
+	registry.Register(&mockPlugin{namespace: "firewall"}, "firewall")
 	registry.Register(&mockPlugin{namespace: "dhcp"}, "dnsmasq")
 	registry.Register(&mockPlugin{namespace: "vpn"}, "wireguard")
 

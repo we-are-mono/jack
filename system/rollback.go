@@ -17,7 +17,7 @@ func RestoreSnapshot(snapshot *SystemSnapshot, scope []string) error {
 	return defaultSnapshotManager.RestoreSnapshot(snapshot, scope)
 }
 
-// RestoreNftablesRules restores the nftables ruleset from a JSON dump.
+// RestoreNftablesRules restores the firewall ruleset from a JSON dump.
 // For testing, create a SnapshotManager with injected dependencies.
 func RestoreNftablesRules(rulesJSON string) error {
 	return defaultSnapshotManager.RestoreNftablesRules(rulesJSON)

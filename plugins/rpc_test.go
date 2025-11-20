@@ -81,6 +81,20 @@ func (m *mockProvider) OnLogEvent(ctx context.Context, logEventJSON []byte) erro
 	return nil
 }
 
+func (m *mockProvider) GetProvidedServices(ctx context.Context) ([]ServiceDescriptor, error) {
+	// Mock implementation - no services provided
+	return nil, nil
+}
+
+func (m *mockProvider) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
+	// Mock implementation - service not found
+	return nil, nil
+}
+
+func (m *mockProvider) SetDaemonService(daemon DaemonService) {
+	// Mock implementation - do nothing
+}
+
 func TestMetadataResponse_Structure(t *testing.T) {
 	metadata := MetadataResponse{
 		Namespace:    "test",

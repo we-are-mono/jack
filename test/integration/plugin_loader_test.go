@@ -75,7 +75,7 @@ func TestLoadPlugin_MultipleInstances(t *testing.T) {
 // TestLoadPlugin_AllCorePlugins tests loading all available core plugins
 func TestLoadPlugin_AllCorePlugins(t *testing.T) {
 	// These plugins should always be available in the integration test environment
-	corePlugins := []string{"monitoring", "nftables", "dnsmasq", "wireguard"}
+	corePlugins := []string{"monitoring", "firewall", "dnsmasq", "wireguard"}
 
 	for _, pluginName := range corePlugins {
 		t.Run(pluginName, func(t *testing.T) {
@@ -126,7 +126,7 @@ func TestScanPlugins_NamespaceMapping(t *testing.T) {
 
 	expectedMappings := map[string]string{
 		"monitoring": "monitoring",
-		"nftables":   "firewall",
+		"firewall":   "firewall",
 		"dnsmasq":    "dhcp",
 		"wireguard":  "vpn",
 	}

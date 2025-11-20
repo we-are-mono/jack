@@ -90,7 +90,7 @@ build_tarball() {
     # Copy config templates
     mkdir -p "${tarball_dir}/templates"
     cp examples/jack.json "${tarball_dir}/templates/"
-    cp config/defaults/firewall.json "${tarball_dir}/templates/nftables.json"
+    cp config/defaults/firewall.json "${tarball_dir}/templates/"
     cp config/defaults/dhcp.json "${tarball_dir}/templates/"
     cp config/defaults/dns.json "${tarball_dir}/templates/"
     cp config/defaults/routes.json "${tarball_dir}/templates/"

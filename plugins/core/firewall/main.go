@@ -9,7 +9,7 @@
 // MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 // GNU General Public License for more details.
 
-// jack-plugin-nftables is a Jack plugin that provides firewall functionality using nftables.
+// jack-plugin-firewall is a Jack plugin that provides firewall functionality using nftables.
 // This plugin runs as a separate process and communicates with Jack via RPC.
 package main
 
@@ -23,14 +23,14 @@ import (
 func main() {
 	// Set up logging to stderr (stdout is used for RPC)
 	log.SetOutput(os.Stderr)
-	log.SetPrefix("[jack-plugin-nftables] ")
+	log.SetPrefix("[jack-plugin-firewall] ")
 
-	log.Println("Starting nftables plugin...")
+	log.Println("Starting firewall plugin...")
 
 	// Create the RPC provider directly
-	provider, err := NewNftablesRPCProvider()
+	provider, err := NewFirewallRPCProvider()
 	if err != nil {
-		log.Fatalf("Failed to create nftables provider: %v", err)
+		log.Fatalf("Failed to create firewall provider: %v", err)
 	}
 
 	// Serve the plugin using RPC protocol

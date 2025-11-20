@@ -72,16 +72,24 @@ type Provider interface {
 // DaemonService is the interface that the daemon provides to plugins for bidirectional RPC.
 // Plugins can use this to call services on other plugins through the daemon's service registry.
 type DaemonService interface {
-	// Ping verifies the daemon service connection is responsive
-	// Used to ensure RPC connection is ready before using CallService
-	Ping(ctx context.Context) error
-
 	// CallService calls a service method on another plugin through the daemon's service registry
 	// serviceName: name of the service (e.g., "database")
 	// method: method name (e.g., "InsertLog")
 	// argsJSON: JSON-encoded method arguments
 	// Returns JSON-encoded result or error
 	CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error)
+
+	// WaitForService blocks until the specified service becomes ready or context is canceled
+	// Returns error if service doesn't exist or context times out
+	WaitForService(ctx context.Context, serviceName string) error
+
+	// WaitForServices blocks until all specified services become ready or context is canceled
+	// Returns error if any service doesn't exist or context times out
+	WaitForServices(ctx context.Context, serviceNames []string) error
+
+	// IsServiceReady checks if a service is ready without blocking
+	// Returns false if service doesn't exist or is not yet ready
+	IsServiceReady(serviceName string) bool
 }
 
 // CLICommand describes a CLI command provided by a plugin
@@ -106,7 +114,7 @@ type MetadataResponse struct {
 	Namespace        string                 `json:"namespace"`
 	Version          string                 `json:"version"`
 	Description      string                 `json:"description"`
-	Category         string                 `json:"category,omitempty"`          // Plugin category (e.g., "firewall", "vpn", "dhcp", "hardware", "monitoring")
+	Category         string                 `json:"category,omitempty"` // Plugin category (e.g., "firewall", "vpn", "dhcp", "hardware", "monitoring")
 	ConfigPath       string                 `json:"config_path"`
 	DefaultConfig    map[string]interface{} `json:"default_config,omitempty"`    // Default configuration for the plugin
 	Dependencies     []string               `json:"dependencies,omitempty"`      // Plugin dependencies (plugin names)
@@ -524,17 +532,47 @@ func (s *DaemonServiceServer) CallService(args *DaemonCallServiceArgs, reply *Da
 	return nil
 }
 
-type DaemonPingArgs struct{}
-type DaemonPingReply struct {
+type DaemonWaitForServiceArgs struct {
+	ServiceName string
+}
+type DaemonWaitForServiceReply struct {
 	Error string
 }
 
-func (s *DaemonServiceServer) Ping(args *DaemonPingArgs, reply *DaemonPingReply) error {
-	err := s.Impl.Ping(context.Background())
+func (s *DaemonServiceServer) WaitForService(args *DaemonWaitForServiceArgs, reply *DaemonWaitForServiceReply) error {
+	err := s.Impl.WaitForService(context.Background(), args.ServiceName)
 	if err != nil {
 		reply.Error = err.Error()
 		return nil
 	}
+	return nil
+}
+
+type DaemonWaitForServicesArgs struct {
+	ServiceNames []string
+}
+type DaemonWaitForServicesReply struct {
+	Error string
+}
+
+func (s *DaemonServiceServer) WaitForServices(args *DaemonWaitForServicesArgs, reply *DaemonWaitForServicesReply) error {
+	err := s.Impl.WaitForServices(context.Background(), args.ServiceNames)
+	if err != nil {
+		reply.Error = err.Error()
+		return nil
+	}
+	return nil
+}
+
+type DaemonIsServiceReadyArgs struct {
+	ServiceName string
+}
+type DaemonIsServiceReadyReply struct {
+	Ready bool
+}
+
+func (s *DaemonServiceServer) IsServiceReady(args *DaemonIsServiceReadyArgs, reply *DaemonIsServiceReadyReply) error {
+	reply.Ready = s.Impl.IsServiceReady(args.ServiceName)
 	return nil
 }
 
@@ -559,9 +597,11 @@ func (c *DaemonServiceClient) CallService(ctx context.Context, serviceName strin
 	return reply.ResultJSON, nil
 }
 
-func (c *DaemonServiceClient) Ping(ctx context.Context) error {
-	var reply DaemonPingReply
-	err := c.client.Call("DaemonService.Ping", &DaemonPingArgs{}, &reply)
+func (c *DaemonServiceClient) WaitForService(ctx context.Context, serviceName string) error {
+	var reply DaemonWaitForServiceReply
+	err := c.client.Call("DaemonService.WaitForService", &DaemonWaitForServiceArgs{
+		ServiceName: serviceName,
+	}, &reply)
 	if err != nil {
 		return err
 	}
@@ -569,6 +609,31 @@ func (c *DaemonServiceClient) Ping(ctx context.Context) error {
 		return ErrFromString(reply.Error)
 	}
 	return nil
+}
+
+func (c *DaemonServiceClient) WaitForServices(ctx context.Context, serviceNames []string) error {
+	var reply DaemonWaitForServicesReply
+	err := c.client.Call("DaemonService.WaitForServices", &DaemonWaitForServicesArgs{
+		ServiceNames: serviceNames,
+	}, &reply)
+	if err != nil {
+		return err
+	}
+	if reply.Error != "" {
+		return ErrFromString(reply.Error)
+	}
+	return nil
+}
+
+func (c *DaemonServiceClient) IsServiceReady(serviceName string) bool {
+	var reply DaemonIsServiceReadyReply
+	err := c.client.Call("DaemonService.IsServiceReady", &DaemonIsServiceReadyArgs{
+		ServiceName: serviceName,
+	}, &reply)
+	if err != nil {
+		return false
+	}
+	return reply.Ready
 }
 
 // ============================================================================

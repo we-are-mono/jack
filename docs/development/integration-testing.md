@@ -180,7 +180,7 @@ source ~/.bashrc
 git clone <repo-url> /opt/jack
 cd /opt/jack
 go build -o jack
-go build -o bin/jack-plugin-nftables plugins/core/nftables/*.go
+go build -o bin/jack-plugin-firewall plugins/core/nftables/*.go
 go build -o bin/jack-plugin-dnsmasq plugins/core/dnsmasq/*.go
 go build -o bin/jack-plugin-wireguard plugins/core/wireguard/*.go
 go build -o bin/jack-plugin-monitoring plugins/core/monitoring/*.go
@@ -251,7 +251,7 @@ COPY . .
 
 # Build Jack
 RUN go build -o jack && \
-    go build -o bin/jack-plugin-nftables plugins/core/nftables/*.go && \
+    go build -o bin/jack-plugin-firewall plugins/core/nftables/*.go && \
     go build -o bin/jack-plugin-dnsmasq plugins/core/dnsmasq/*.go && \
     go build -o bin/jack-plugin-wireguard plugins/core/wireguard/*.go && \
     go build -o bin/jack-plugin-monitoring plugins/core/monitoring/*.go

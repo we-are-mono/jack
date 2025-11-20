@@ -495,6 +495,35 @@ Dial(conn)  // Blocks until Accept is ready
 - Hides the real synchronization requirements
 - Proper Go concurrency patterns are faster, safer, and more maintainable
 
+#### Service Waiting for Plugin Coordination
+
+When plugins need to wait for other services (e.g., database service) to become ready, use the `DaemonService` interface methods instead of time.Sleep:
+
+```go
+// ✅ GOOD: Wait for service using channel-based infrastructure
+ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+defer cancel()
+
+if err := p.daemonService.WaitForService(ctx, "database"); err != nil {
+    log.Printf("Warning: database service not ready: %v\n", err)
+    return
+}
+// Service is ready, proceed with operations
+```
+
+**Available methods:**
+- `WaitForService(ctx, serviceName)` - Blocks until service ready or timeout
+- `WaitForServices(ctx, serviceNames)` - Waits for multiple services
+- `IsServiceReady(serviceName)` - Non-blocking ready check
+
+**Architecture:**
+- ServiceRegistry maintains `readyChannels` (closed when service ready)
+- `MarkServiceReady()` called by daemon after successful `ApplyConfig`
+- Channels provide immediate wake-up when service becomes available
+- Context-aware for proper timeout and cancellation handling
+
+**Example use case:** Firewall plugin waiting for database service before initializing logging schema (see [plugins/core/firewall/rpc_provider.go:357-377](plugins/core/firewall/rpc_provider.go#L357-L377))
+
 ### Git Workflow
 
 **IMPORTANT: Claude should NEVER create git commits.** All git commits must be done manually by the user.
@@ -567,7 +596,7 @@ Cross-compilation for arm64 target:
 GOOS=linux GOARCH=arm64 go build -o jack
 
 # Plugins (must match target architecture)
-GOOS=linux GOARCH=arm64 go build -o jack-plugin-nftables plugins/core/nftables/*.go
+GOOS=linux GOARCH=arm64 go build -o jack-plugin-firewall plugins/core/nftables/*.go
 GOOS=linux GOARCH=arm64 go build -o jack-plugin-dnsmasq plugins/core/dnsmasq/*.go
 GOOS=linux GOARCH=arm64 go build -o jack-plugin-wireguard plugins/core/wireguard/*.go
 ```

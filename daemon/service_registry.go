@@ -257,13 +257,22 @@ func NewDaemonServiceImpl(registry *ServiceRegistry) *DaemonServiceImpl {
 	return &DaemonServiceImpl{registry: registry}
 }
 
-// Ping verifies the daemon service connection is responsive
-func (d *DaemonServiceImpl) Ping(ctx context.Context) error {
-	// Simply return nil - if we can execute this method, the RPC connection is working
-	return nil
-}
-
 // CallService routes a service call from a plugin to another plugin's service
 func (d *DaemonServiceImpl) CallService(ctx context.Context, serviceName string, method string, argsJSON []byte) ([]byte, error) {
 	return d.registry.CallService(ctx, serviceName, method, argsJSON)
+}
+
+// WaitForService blocks until the specified service becomes ready
+func (d *DaemonServiceImpl) WaitForService(ctx context.Context, serviceName string) error {
+	return d.registry.WaitForService(ctx, serviceName)
+}
+
+// WaitForServices blocks until all specified services become ready
+func (d *DaemonServiceImpl) WaitForServices(ctx context.Context, serviceNames []string) error {
+	return d.registry.WaitForServices(ctx, serviceNames)
+}
+
+// IsServiceReady checks if a service is ready without blocking
+func (d *DaemonServiceImpl) IsServiceReady(serviceName string) bool {
+	return d.registry.IsServiceReady(serviceName)
 }

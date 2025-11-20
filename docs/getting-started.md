@@ -206,7 +206,7 @@ sudo journalctl -u jack -n 50 --no-pager
 
 Common issues:
 - **Invalid JSON**: Run `jack validate` to find syntax errors
-- **Missing dependencies**: Install `nftables`, `dnsmasq`, or `wireguard-tools` as needed
+- **Missing dependencies**: Install `firewall`, `dnsmasq`, or `wireguard-tools` as needed
 - **Permission denied**: Ensure jack is run as root
 
 ### Configuration Not Applied

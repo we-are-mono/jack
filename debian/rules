@@ -77,7 +77,7 @@ override_dh_auto_install:
 
 	# Install default config templates
 	install -D -m 0644 examples/jack.json $(CURDIR)/debian/jack/etc/jack/templates/jack.json
-	install -D -m 0644 config/defaults/firewall.json $(CURDIR)/debian/jack/etc/jack/templates/nftables.json
+	install -D -m 0644 config/defaults/firewall.json $(CURDIR)/debian/jack/etc/jack/templates/firewall.json
 	install -D -m 0644 config/defaults/dhcp.json $(CURDIR)/debian/jack/etc/jack/templates/dhcp.json
 	install -D -m 0644 config/defaults/dns.json $(CURDIR)/debian/jack/etc/jack/templates/dns.json
 	install -D -m 0644 config/defaults/routes.json $(CURDIR)/debian/jack/etc/jack/templates/routes.json

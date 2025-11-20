@@ -31,7 +31,7 @@ The `/etc/jack/jack.json` file (or `jack.json` in your working directory) is use
 ### Provider Selection
 
 Each service can be provided by a different plugin. For example:
-- Use `nftables` for firewall
+- Use `firewall` for firewall
 - Use `dnsmasq` for both DHCP and DNS
 - Or use `dnsmasq` for DHCP and `unbound` for DNS
 
@@ -91,7 +91,7 @@ Jack searches for plugins in the following directories (in order):
 Plugins follow the naming convention: `jack-plugin-{name}`
 
 For example:
-- `jack-plugin-nftables` provides firewall capability
+- `jack-plugin-firewall` provides firewall capability
 - `jack-plugin-dnsmasq` provides both DHCP and DNS capabilities
 
 ## Core Plugins

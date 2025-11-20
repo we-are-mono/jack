@@ -195,7 +195,7 @@ The `jack validate` command checks these files:
 ### Optional Files
 
 - **routes.json** - Static routes
-- **nftables.json** - Firewall rules (if nftables plugin enabled)
+- **nftables.json** - Firewall rules (if firewall plugin enabled)
 - **dnsmasq.json** - DHCP/DNS configuration (if dnsmasq plugin enabled)
 - **wireguard.json** - VPN configuration (if wireguard plugin enabled)
 

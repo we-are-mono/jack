@@ -31,14 +31,13 @@ coverage-unit:
 coverage-integration: docker-base-image
 	@echo "==> Building binaries locally..."
 	@mkdir -p bin
-	@go build -o jack
-	@cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
-	@cd plugins/core/wireguard && go build -o ../../../bin/jack-plugin-wireguard .
-	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
-	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
-	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
-	@cd plugins/core/sqlite3 && go build -o ../../../bin/jack-plugin-sqlite3 .
-	@cd plugins/core/firewall-logging && go build -o ../../../bin/jack-plugin-firewall-logging .
+	@CGO_ENABLED=0 go build -o jack
+	@cd plugins/core/firewall && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-firewall .
+	@cd plugins/core/wireguard && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-wireguard .
+	@cd plugins/core/dnsmasq && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-dnsmasq .
+	@cd plugins/core/monitoring && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-monitoring .
+	@cd plugins/core/leds && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-leds .
+	@cd plugins/core/sqlite3 && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-sqlite3 .
 	@echo "==> Running integration tests with coverage in container..."
 	@mkdir -p coverage-data
 	@docker run --rm --privileged --cap-add=ALL \
@@ -129,14 +128,13 @@ clean-check: lint deadcode coverage
 test-integration: docker-base-image
 	@echo "==> Building binaries locally..."
 	@mkdir -p bin
-	@go build -o jack
-	@cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
-	@cd plugins/core/wireguard && go build -o ../../../bin/jack-plugin-wireguard .
-	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
-	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
-	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
-	@cd plugins/core/sqlite3 && go build -o ../../../bin/jack-plugin-sqlite3 .
-	@cd plugins/core/firewall-logging && go build -o ../../../bin/jack-plugin-firewall-logging .
+	@CGO_ENABLED=0 go build -o jack
+	@cd plugins/core/firewall && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-firewall .
+	@cd plugins/core/wireguard && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-wireguard .
+	@cd plugins/core/dnsmasq && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-dnsmasq .
+	@cd plugins/core/monitoring && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-monitoring .
+	@cd plugins/core/leds && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-leds .
+	@cd plugins/core/sqlite3 && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-sqlite3 .
 	@echo "==> Running integration tests in container..."
 	@docker run --rm --privileged --cap-add=ALL \
 		-v $(PWD):/opt/jack \
@@ -149,14 +147,13 @@ test-integration: docker-base-image
 test-docker-combined: docker-base-image
 	@echo "==> Building binaries locally..."
 	@mkdir -p bin
-	@go build -o jack
-	@cd plugins/core/nftables && go build -o ../../../bin/jack-plugin-nftables .
-	@cd plugins/core/wireguard && go build -o ../../../bin/jack-plugin-wireguard .
-	@cd plugins/core/dnsmasq && go build -o ../../../bin/jack-plugin-dnsmasq .
-	@cd plugins/core/monitoring && go build -o ../../../bin/jack-plugin-monitoring .
-	@cd plugins/core/leds && go build -o ../../../bin/jack-plugin-leds .
-	@cd plugins/core/sqlite3 && go build -o ../../../bin/jack-plugin-sqlite3 .
-	@cd plugins/core/firewall-logging && go build -o ../../../bin/jack-plugin-firewall-logging .
+	@CGO_ENABLED=0 go build -o jack
+	@cd plugins/core/firewall && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-firewall .
+	@cd plugins/core/wireguard && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-wireguard .
+	@cd plugins/core/dnsmasq && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-dnsmasq .
+	@cd plugins/core/monitoring && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-monitoring .
+	@cd plugins/core/leds && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-leds .
+	@cd plugins/core/sqlite3 && CGO_ENABLED=0 go build -o ../../../bin/jack-plugin-sqlite3 .
 	@echo "==> Running unit and integration tests in Docker with coverage..."
 	@mkdir -p coverage-data
 	@docker run --rm --privileged --cap-add=ALL \

@@ -83,10 +83,29 @@ func registerPluginCommands(pluginPath string) error {
 	// Close the client - we'll start new instances when commands are executed
 	client.Close()
 
-	// Register CLI commands
-	for _, cliCmd := range metadata.CLICommands {
+	// Sort CLI commands: process commands without spaces first, then multi-word commands
+	// This ensures parent commands exist before we try to attach subcommands
+	sortedCommands := make([]plugins.CLICommand, len(metadata.CLICommands))
+	copy(sortedCommands, metadata.CLICommands)
+
+	// Sort by number of spaces in the name (fewer spaces first)
+	for i := 0; i < len(sortedCommands); i++ {
+		for j := i + 1; j < len(sortedCommands); j++ {
+			iSpaces := strings.Count(sortedCommands[i].Name, " ")
+			jSpaces := strings.Count(sortedCommands[j].Name, " ")
+			if iSpaces > jSpaces {
+				sortedCommands[i], sortedCommands[j] = sortedCommands[j], sortedCommands[i]
+			}
+		}
+	}
+
+	// Register CLI commands in sorted order
+	for _, cliCmd := range sortedCommands {
 		cmd := createPluginCommand(pluginPath, cliCmd)
-		rootCmd.AddCommand(cmd)
+		// cmd will be nil if it was added as a subcommand to an existing parent
+		if cmd != nil {
+			rootCmd.AddCommand(cmd)
+		}
 	}
 
 	return nil
@@ -94,6 +113,42 @@ func registerPluginCommands(pluginPath string) error {
 
 // createPluginCommand creates a cobra command that delegates to a plugin
 func createPluginCommand(pluginPath string, cliCmd plugins.CLICommand) *cobra.Command {
+	// Handle commands with spaces (e.g., "firewall watch")
+	// These should be attached as subcommands to the parent
+	parts := strings.Fields(cliCmd.Name)
+	if len(parts) > 1 {
+		// This is a multi-word command like "firewall watch"
+		// Find or create the parent command
+		parentName := parts[0]
+		subName := strings.Join(parts[1:], " ")
+
+		// Check if parent command exists
+		parentCmd := findCommand(rootCmd, parentName)
+		if parentCmd == nil {
+			// Create parent command
+			parentCmd = &cobra.Command{
+				Use:   parentName,
+				Short: fmt.Sprintf("%s commands", parentName),
+			}
+			rootCmd.AddCommand(parentCmd)
+		}
+
+		// Create subcommand
+		subCmd := &cobra.Command{
+			Use:                subName,
+			Short:              cliCmd.Short,
+			Long:               cliCmd.Long,
+			DisableFlagParsing: true,
+			Run: func(cmd *cobra.Command, args []string) {
+				executePluginCommand(pluginPath, cliCmd, "", args)
+			},
+		}
+		parentCmd.AddCommand(subCmd)
+
+		// Return nil since we added it to an existing parent
+		return nil
+	}
+
 	cmd := &cobra.Command{
 		Use:   cliCmd.Name,
 		Short: cliCmd.Short,
@@ -124,6 +179,16 @@ func createPluginCommand(pluginPath string, cliCmd plugins.CLICommand) *cobra.Co
 	return cmd
 }
 
+// findCommand searches for a command by name in the given parent command
+func findCommand(parent *cobra.Command, name string) *cobra.Command {
+	for _, cmd := range parent.Commands() {
+		if cmd.Name() == name {
+			return cmd
+		}
+	}
+	return nil
+}
+
 // executePluginCommand sends a CLI command request to the daemon
 func executePluginCommand(pluginPath string, cliCmd plugins.CLICommand, subcommand string, args []string) {
 	// Extract plugin name from path (e.g., /usr/lib/jack/plugins/jack-plugin-monitoring -> monitoring)
@@ -137,7 +202,9 @@ func executePluginCommand(pluginPath string, cliCmd plugins.CLICommand, subcomma
 	}
 
 	// Check if this is a continuous command (metadata-driven)
-	if cliCmd.Continuous {
+	// Special case: "firewall watch" is continuous even though parent isn't
+	isContinuous := cliCmd.Continuous || fullCommand == "firewall watch"
+	if isContinuous {
 		// Get poll interval (default to 2 seconds if not specified)
 		pollInterval := cliCmd.PollInterval
 		if pollInterval <= 0 {
@@ -182,7 +249,10 @@ func executeContinuousCommand(pluginName, fullCommand string, args []string, pol
 	defer ticker.Stop()
 
 	// Print initial output immediately
-	printCommandSnapshot(pluginName, fullCommand, args)
+	shouldContinue := printCommandSnapshot(pluginName, fullCommand, args)
+	if !shouldContinue {
+		return
+	}
 
 	for {
 		select {
@@ -193,13 +263,17 @@ func executeContinuousCommand(pluginName, fullCommand string, args []string, pol
 		case <-ticker.C:
 			// Clear screen and print updated info
 			clearScreen()
-			printCommandSnapshot(pluginName, fullCommand, args)
+			shouldContinue := printCommandSnapshot(pluginName, fullCommand, args)
+			if !shouldContinue {
+				return
+			}
 		}
 	}
 }
 
-// printCommandSnapshot fetches and prints a single command snapshot from the daemon
-func printCommandSnapshot(pluginName, fullCommand string, args []string) {
+// printCommandSnapshot fetches and prints a single command snapshot from the daemon.
+// Returns false if the command should stop (due to error or degraded state).
+func printCommandSnapshot(pluginName, fullCommand string, args []string) bool {
 	resp, err := client.Send(daemon.Request{
 		Command:    "plugin-cli",
 		Plugin:     pluginName,
@@ -209,20 +283,31 @@ func printCommandSnapshot(pluginName, fullCommand string, args []string) {
 
 	if err != nil {
 		fmt.Printf("[ERROR] %v\n", err)
-		return
+		fmt.Println("\nCannot continue - daemon communication failed.")
+		return false
 	}
 
 	if !resp.Success {
 		fmt.Printf("[ERROR] %s\n", resp.Error)
-		return
+		fmt.Println("\nCannot continue - command failed.")
+		return false
 	}
 
 	// Print output
 	if resp.Data != nil {
 		if outputStr, ok := resp.Data.(string); ok && outputStr != "" {
+			// Check if output indicates an error condition (plugin returned error message as output)
+			// This happens when plugins want to provide helpful error messages
+			if strings.HasPrefix(strings.TrimSpace(outputStr), "Error:") {
+				fmt.Print(outputStr)
+				fmt.Println("\nCannot continue - service unavailable.")
+				return false
+			}
 			fmt.Print(outputStr)
 		}
 	}
+
+	return true
 }
 
 // clearScreen clears the terminal screen using ANSI escape codes
